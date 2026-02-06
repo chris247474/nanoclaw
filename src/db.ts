@@ -9,8 +9,8 @@ import { NewMessage, ScheduledTask, TaskRunLog } from './types.js';
 
 let db: Database.Database;
 
-export function initDatabase(): void {
-  const dbPath = path.join(STORE_DIR, 'messages.db');
+export function initDatabase(customDbPath?: string): void {
+  const dbPath = customDbPath || path.join(STORE_DIR, 'messages.db');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
   db = new Database(dbPath);
@@ -196,7 +196,8 @@ export function storeMessage(
   // Extract mentions from the message
   const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
   const mentionedJids = contextInfo?.mentionedJid || [];
-  const mentions = mentionedJids.length > 0 ? JSON.stringify(mentionedJids) : null;
+  const mentions =
+    mentionedJids.length > 0 ? JSON.stringify(mentionedJids) : null;
 
   const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString();
   const sender = msg.key.participant || msg.key.remoteJid || '';
