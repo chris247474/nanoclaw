@@ -274,7 +274,7 @@ async function main(): Promise<void> {
       nanoclaw: ipcMcp
     };
 
-    // Add Google Workspace MCP if credentials exist
+    // Add Google Workspace MCP if credentials exist (main only)
     const googleCredsPath = '/workspace/project/data/google_client_secret.json';
     if (input.isMain && fs.existsSync(googleCredsPath)) {
       mcpServers['google-workspace'] = {
@@ -282,6 +282,16 @@ async function main(): Promise<void> {
         args: ['-y', '@presto-ai/google-workspace-mcp'],
         env: {
           GOOGLE_OAUTH_CREDENTIALS: googleCredsPath
+        }
+      };
+    }
+
+    // Add Figma MCP if token exists (available to all groups)
+    if (process.env.FIGMA_ACCESS_TOKEN) {
+      mcpServers['figma'] = {
+        command: 'figma-developer-mcp',
+        env: {
+          FIGMA_ACCESS_TOKEN: process.env.FIGMA_ACCESS_TOKEN
         }
       };
     }
@@ -295,7 +305,8 @@ async function main(): Promise<void> {
         'Read', 'Write', 'Edit', 'Glob', 'Grep',
         'WebSearch', 'WebFetch',
         'mcp__nanoclaw__*',
-        'mcp__google-workspace__*'
+        'mcp__google-workspace__*',
+        'mcp__figma__*'
       ],
       permissionMode: 'bypassPermissions' as const,
       allowDangerouslySkipPermissions: true,

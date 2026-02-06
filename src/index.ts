@@ -187,7 +187,52 @@ function getAvailableGroups(): AvailableGroup[] {
 }
 
 async function processMessage(msg: NewMessage): Promise<void> {
-  const group = registeredGroups[msg.chat_jid];
+  let group = registeredGroups[msg.chat_jid];
+
+  // Auto-register new group chats when triggered
+  if (!group && msg.chat_jid.endsWith('@g.us')) {
+    const content = msg.content.trim();
+    const hasTrigger = TRIGGER_PATTERN.test(content);
+    let hasMention = false;
+    if (msg.mentions && sock?.user?.id) {
+      try {
+        const mentionedJids: string[] = JSON.parse(msg.mentions);
+        const botJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+        hasMention = mentionedJids.includes(botJid);
+      } catch {
+        // Ignore JSON parse errors
+      }
+    }
+
+    if (hasTrigger || hasMention) {
+      // Look up group name from chat metadata, fallback to JID prefix
+      const allChats = getAllChats();
+      const chatInfo = allChats.find((c) => c.jid === msg.chat_jid);
+      const groupName = chatInfo?.name || msg.chat_jid.split('@')[0];
+      const folder = groupName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '') || msg.chat_jid.split('@')[0];
+
+      registerGroup(msg.chat_jid, {
+        name: groupName,
+        folder,
+        trigger: `@${ASSISTANT_NAME}`,
+        added_at: new Date().toISOString(),
+      });
+
+      // Store the triggering message now that the group is registered
+      storeMessage(
+        { key: { id: msg.id, remoteJid: msg.chat_jid, participant: msg.sender }, messageTimestamp: BigInt(Math.floor(new Date(msg.timestamp).getTime() / 1000)), message: { conversation: msg.content } } as any,
+        msg.chat_jid,
+        false,
+        msg.sender_name,
+      );
+
+      group = registeredGroups[msg.chat_jid];
+    }
+  }
+
   if (!group) {
     logger.debug(
       {
@@ -795,8 +840,8 @@ async function connectWhatsApp(): Promise<void> {
       // Always store chat metadata for group discovery
       storeChatMetadata(chatJid, timestamp);
 
-      // Only store full message content for registered groups
-      if (registeredGroups[chatJid]) {
+      // Store messages for registered groups and all group chats (for auto-registration)
+      if (registeredGroups[chatJid] || chatJid.endsWith('@g.us')) {
         storeMessage(
           msg,
           chatJid,
@@ -818,7 +863,13 @@ async function startMessageLoop(): Promise<void> {
 
   while (true) {
     try {
-      const jids = Object.keys(registeredGroups);
+      // Include registered groups + all known group chats (for auto-registration)
+      const registeredJids = new Set(Object.keys(registeredGroups));
+      const allChats = getAllChats();
+      for (const chat of allChats) {
+        if (chat.jid.endsWith('@g.us')) registeredJids.add(chat.jid);
+      }
+      const jids = [...registeredJids];
       const { messages } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
 
       if (messages.length > 0)

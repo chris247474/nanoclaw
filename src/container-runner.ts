@@ -137,6 +137,7 @@ function buildVolumeMounts(
       'OPENAI_API_KEY',
       'OPENAI_MODEL',
       'OPENAI_BASE_URL',
+      'FIGMA_ACCESS_TOKEN',
     ];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();
