@@ -5,7 +5,6 @@ set -e
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HOME_DIR="$HOME"
-NODE_PATH=$(which node)
 NPM_PATH=$(which npm)
 
 # Create logs directory
@@ -18,7 +17,6 @@ PLIST_DEST="$HOME_DIR/Library/LaunchAgents/com.nanoclaw.watcher.plist"
 # Replace placeholders
 sed -e "s|{{PROJECT_ROOT}}|$PROJECT_ROOT|g" \
     -e "s|{{HOME}}|$HOME_DIR|g" \
-    -e "s|{{NODE_PATH}}|$NODE_PATH|g" \
     -e "s|{{NPM_PATH}}|$NPM_PATH|g" \
     "$PLIST_TEMPLATE" > "$PLIST_DEST"
 

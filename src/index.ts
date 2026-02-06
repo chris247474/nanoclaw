@@ -93,6 +93,15 @@ function loadState(): void {
     path.join(DATA_DIR, 'registered_groups.json'),
     {},
   );
+
+  // Seed LID-to-phone map from registered groups with known lidJid
+  for (const [phoneJid, group] of Object.entries(registeredGroups)) {
+    if (group.lidJid) {
+      const lidUser = group.lidJid.split('@')[0].split(':')[0];
+      lidToPhoneMap[lidUser] = phoneJid;
+    }
+  }
+
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
@@ -179,7 +188,17 @@ function getAvailableGroups(): AvailableGroup[] {
 
 async function processMessage(msg: NewMessage): Promise<void> {
   const group = registeredGroups[msg.chat_jid];
-  if (!group) return;
+  if (!group) {
+    logger.debug(
+      {
+        chat_jid: msg.chat_jid,
+        sender: msg.sender,
+        registered_jids: Object.keys(registeredGroups),
+      },
+      'Message from unregistered chat',
+    );
+    return;
+  }
 
   const content = msg.content.trim();
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER || group.isMain;
@@ -243,7 +262,7 @@ async function runAgent(
   prompt: string,
   chatJid: string,
 ): Promise<string | null> {
-  const isMain = group.folder === MAIN_GROUP_FOLDER;
+  const isMain = group.folder === MAIN_GROUP_FOLDER || group.isMain === true;
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
@@ -741,6 +760,24 @@ async function connectWhatsApp(): Promise<void> {
   });
 
   sock.ev.on('creds.update', saveCreds);
+
+  // Build LID-to-phone mapping for all contacts (not just self)
+  sock.ev.on('lid-mapping.update', ({ lid, pn }) => {
+    const lidUser = lid.split('@')[0].split(':')[0];
+    const phoneJid = pn.includes('@') ? pn : `${pn}@s.whatsapp.net`;
+    lidToPhoneMap[lidUser] = phoneJid;
+    logger.debug({ lidUser, phoneJid }, 'LID mapping updated');
+  });
+
+  sock.ev.on('contacts.upsert', (contacts) => {
+    for (const contact of contacts) {
+      if (contact.lid && contact.id?.endsWith('@s.whatsapp.net')) {
+        const lidUser = contact.lid.split('@')[0].split(':')[0];
+        lidToPhoneMap[lidUser] = contact.id;
+      }
+    }
+    logger.debug({ mapSize: Object.keys(lidToPhoneMap).length }, 'LID map updated from contacts');
+  });
 
   sock.ev.on('messages.upsert', ({ messages }) => {
     for (const msg of messages) {

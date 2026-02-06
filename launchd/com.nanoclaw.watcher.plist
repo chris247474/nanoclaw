@@ -6,7 +6,6 @@
     <string>com.nanoclaw.watcher</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{{NODE_PATH}}</string>
         <string>{{NPM_PATH}}</string>
         <string>run</string>
         <string>watch</string>
@@ -20,7 +19,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>{{HOME}}/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <string>{{HOME}}/.nvm/versions/node/current/bin:{{HOME}}/.local/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
         <key>HOME</key>
         <string>{{HOME}}</string>
     </dict>
