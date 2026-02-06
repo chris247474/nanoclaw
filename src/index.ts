@@ -182,10 +182,24 @@ async function processMessage(msg: NewMessage): Promise<void> {
   if (!group) return;
 
   const content = msg.content.trim();
-  const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+  const isMainGroup = group.folder === MAIN_GROUP_FOLDER || group.isMain;
 
-  // Main group responds to all messages; other groups require trigger prefix
-  if (!isMainGroup && !TRIGGER_PATTERN.test(content)) return;
+  // Main group responds to all messages; other groups require trigger prefix or @mention
+  const hasTrigger = TRIGGER_PATTERN.test(content);
+
+  // Check if bot is mentioned in the message
+  let hasMention = false;
+  if (msg.mentions && sock?.user?.id) {
+    try {
+      const mentionedJids: string[] = JSON.parse(msg.mentions);
+      const botJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+      hasMention = mentionedJids.includes(botJid);
+    } catch {
+      // Ignore JSON parse errors
+    }
+  }
+
+  if (!isMainGroup && !hasTrigger && !hasMention) return;
 
   // Get all messages since last agent interaction so the session has full context
   const sinceTimestamp = lastAgentTimestamp[msg.chat_jid] || '';

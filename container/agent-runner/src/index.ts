@@ -231,40 +231,118 @@ async function main(): Promise<void> {
     prompt = `[SCHEDULED TASK - You are running automatically, not in response to a user message. Use mcp__nanoclaw__send_message if needed to communicate with the user.]\n\n${input.prompt}`;
   }
 
-  try {
-    log('Starting agent...');
+  // Save original env vars for fallback
+  const origApiKey = process.env.ANTHROPIC_API_KEY;
+  const origBaseUrl = process.env.ANTHROPIC_BASE_URL;
+  const origModel = process.env.ANTHROPIC_MODEL;
+  const origOAuthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
 
-    for await (const message of query({
-      prompt,
-      options: {
-        cwd: '/workspace/group',
-        resume: input.sessionId,
-        allowedTools: [
-          'Bash',
-          'Read', 'Write', 'Edit', 'Glob', 'Grep',
-          'WebSearch', 'WebFetch',
-          'mcp__nanoclaw__*'
-        ],
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        settingSources: ['project'],
-        mcpServers: {
-          nanoclaw: ipcMcp
-        },
-        hooks: {
-          PreCompact: [{ hooks: [createPreCompactHook()] }]
+  function setThirdPartyEnv() {
+    // Route the Claude Agent SDK to the 3rd party provider
+    // by overriding ANTHROPIC_* env vars
+    process.env.ANTHROPIC_API_KEY = process.env.OPENAI_API_KEY;
+    process.env.ANTHROPIC_BASE_URL = process.env.OPENAI_BASE_URL;
+    process.env.ANTHROPIC_MODEL = process.env.OPENAI_MODEL;
+    // Clear OAuth token so it doesn't conflict
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  }
+
+  function restoreClaudeEnv() {
+    // Restore original env vars for Claude fallback
+    if (origApiKey) {
+      process.env.ANTHROPIC_API_KEY = origApiKey;
+    } else {
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+    if (origBaseUrl) {
+      process.env.ANTHROPIC_BASE_URL = origBaseUrl;
+    } else {
+      delete process.env.ANTHROPIC_BASE_URL;
+    }
+    if (origModel) {
+      process.env.ANTHROPIC_MODEL = origModel;
+    } else {
+      delete process.env.ANTHROPIC_MODEL;
+    }
+    if (origOAuthToken) {
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = origOAuthToken;
+    }
+  }
+
+  function buildQueryOptions(modelConfig: any = {}) {
+    const mcpServers: any = {
+      nanoclaw: ipcMcp
+    };
+
+    // Add Google Workspace MCP if credentials exist
+    const googleCredsPath = '/workspace/project/data/google_client_secret.json';
+    if (input.isMain && fs.existsSync(googleCredsPath)) {
+      mcpServers['google-workspace'] = {
+        command: 'npx',
+        args: ['-y', '@presto-ai/google-workspace-mcp'],
+        env: {
+          GOOGLE_OAUTH_CREDENTIALS: googleCredsPath
         }
+      };
+    }
+
+    return {
+      ...modelConfig,
+      cwd: '/workspace/group',
+      resume: input.sessionId,
+      allowedTools: [
+        'Bash',
+        'Read', 'Write', 'Edit', 'Glob', 'Grep',
+        'WebSearch', 'WebFetch',
+        'mcp__nanoclaw__*',
+        'mcp__google-workspace__*'
+      ],
+      permissionMode: 'bypassPermissions' as const,
+      allowDangerouslySkipPermissions: true,
+      settingSources: ['project'] as const,
+      mcpServers,
+      hooks: {
+        PreCompact: [{ hooks: [createPreCompactHook()] }]
       }
-    })) {
+    };
+  }
+
+  async function runAgent(options: any) {
+    for await (const message of query({ prompt, options })) {
       if (message.type === 'system' && message.subtype === 'init') {
         newSessionId = message.session_id;
         log(`Session initialized: ${newSessionId}`);
       }
-
       if ('result' in message && message.result) {
         result = message.result as string;
       }
     }
+  }
+
+  const useThirdParty = !!(process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL && process.env.OPENAI_MODEL);
+
+  try {
+    log('Starting agent...');
+
+    if (useThirdParty) {
+      log(`Using 3rd party model: ${process.env.OPENAI_MODEL} via ${process.env.OPENAI_BASE_URL}`);
+      setThirdPartyEnv();
+    } else if (process.env.CLAUDE_MODEL) {
+      log(`Using Claude model: ${process.env.CLAUDE_MODEL}`);
+    }
+
+    const modelConfig: any = {};
+    if (!useThirdParty && process.env.CLAUDE_MODEL) {
+      modelConfig.model = process.env.CLAUDE_MODEL;
+      if (process.env.CLAUDE_FALLBACK_MODEL) {
+        modelConfig.fallbackModel = process.env.CLAUDE_FALLBACK_MODEL;
+      }
+    }
+
+    await runAgent(buildQueryOptions(modelConfig));
+
+    // Restore env after success
+    if (useThirdParty) restoreClaudeEnv();
 
     log('Agent completed successfully');
     writeOutput({
@@ -275,6 +353,44 @@ async function main(): Promise<void> {
 
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
+
+    // If 3rd party failed and Claude fallback is available, try Claude
+    if (useThirdParty && (origOAuthToken || origApiKey)) {
+      log(`Primary model failed: ${errorMessage}`);
+      log('Attempting fallback to Claude...');
+      restoreClaudeEnv();
+
+      try {
+        const claudeConfig: any = {};
+        if (process.env.CLAUDE_MODEL) {
+          claudeConfig.model = process.env.CLAUDE_MODEL;
+        }
+        if (process.env.CLAUDE_FALLBACK_MODEL) {
+          claudeConfig.fallbackModel = process.env.CLAUDE_FALLBACK_MODEL;
+        }
+
+        await runAgent(buildQueryOptions(claudeConfig));
+
+        log('Agent completed successfully with Claude fallback');
+        writeOutput({
+          status: 'success',
+          result,
+          newSessionId
+        });
+        return;
+      } catch (fallbackErr) {
+        const fallbackMessage = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        log(`Claude fallback also failed: ${fallbackMessage}`);
+        writeOutput({
+          status: 'error',
+          result: null,
+          newSessionId,
+          error: `Primary failed: ${errorMessage}. Fallback failed: ${fallbackMessage}`
+        });
+        process.exit(1);
+      }
+    }
+
     log(`Agent error: ${errorMessage}`);
     writeOutput({
       status: 'error',
