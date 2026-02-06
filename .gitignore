@@ -22,3 +22,6 @@ logs/
 
 agents-sdk-docs
 groups/main/conversations/
+coverage/
+
+CLAUDE.md

@@ -1,0 +1,28 @@
+[Unit]
+Description=NanoClaw Personal Assistant
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=nanoclaw
+Group=nanoclaw
+WorkingDirectory=/opt/nanoclaw
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=10
+EnvironmentFile=/opt/nanoclaw/.env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nanoclaw
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/nanoclaw/store /opt/nanoclaw/data /opt/nanoclaw/groups /opt/nanoclaw/logs
+
+[Install]
+WantedBy=multi-user.target
