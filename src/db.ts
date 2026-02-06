@@ -28,6 +28,7 @@ export function initDatabase(): void {
       content TEXT,
       timestamp TEXT,
       is_from_me INTEGER,
+      mentions TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -74,6 +75,13 @@ export function initDatabase(): void {
     db.exec(
       `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
     );
+  } catch {
+    /* column already exists */
+  }
+
+  // Add mentions column if it doesn't exist (migration for existing DBs)
+  try {
+    db.exec(`ALTER TABLE messages ADD COLUMN mentions TEXT`);
   } catch {
     /* column already exists */
   }
@@ -185,13 +193,18 @@ export function storeMessage(
     msg.message?.videoMessage?.caption ||
     '';
 
+  // Extract mentions from the message
+  const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
+  const mentionedJids = contextInfo?.mentionedJid || [];
+  const mentions = mentionedJids.length > 0 ? JSON.stringify(mentionedJids) : null;
+
   const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString();
   const sender = msg.key.participant || msg.key.remoteJid || '';
   const senderName = pushName || sender.split('@')[0];
   const msgId = msg.key.id || '';
 
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, mentions) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msgId,
     chatJid,
@@ -200,6 +213,7 @@ export function storeMessage(
     content,
     timestamp,
     isFromMe ? 1 : 0,
+    mentions,
   );
 }
 
@@ -213,7 +227,7 @@ export function getNewMessages(
   const placeholders = jids.map(() => '?').join(',');
   // Filter out bot's own messages by checking content prefix (not is_from_me, since user shares the account)
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, mentions
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ?
     ORDER BY timestamp
@@ -238,7 +252,7 @@ export function getMessagesSince(
 ): NewMessage[] {
   // Filter out bot's own messages by checking content prefix
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, mentions
     FROM messages
     WHERE chat_jid = ? AND timestamp > ? AND content NOT LIKE ?
     ORDER BY timestamp

@@ -45,3 +45,12 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Model configuration
+export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929';
+export const CLAUDE_FALLBACK_MODEL = process.env.CLAUDE_FALLBACK_MODEL;
+
+// 3rd party model support (OpenAI, etc.)
+export const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+export const OPENAI_MODEL = process.env.OPENAI_MODEL;
+export const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL; // For OpenAI-compatible APIs

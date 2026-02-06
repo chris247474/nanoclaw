@@ -38,6 +38,8 @@ export interface RegisteredGroup {
   folder: string;
   trigger: string;
   added_at: string;
+  isMain?: boolean;
+  lidJid?: string; // LID JID for DM contacts (e.g., "223952496496782@lid")
   containerConfig?: ContainerConfig;
 }
 
@@ -52,6 +54,7 @@ export interface NewMessage {
   sender_name: string;
   content: string;
   timestamp: string;
+  mentions?: string | null;
 }
 
 export interface ScheduledTask {

@@ -93,6 +93,15 @@ function loadState(): void {
     path.join(DATA_DIR, 'registered_groups.json'),
     {},
   );
+
+  // Seed LID-to-phone map from registered groups with known lidJid
+  for (const [phoneJid, group] of Object.entries(registeredGroups)) {
+    if (group.lidJid) {
+      const lidUser = group.lidJid.split('@')[0].split(':')[0];
+      lidToPhoneMap[lidUser] = phoneJid;
+    }
+  }
+
   logger.info(
     { groupCount: Object.keys(registeredGroups).length },
     'State loaded',
@@ -179,13 +188,37 @@ function getAvailableGroups(): AvailableGroup[] {
 
 async function processMessage(msg: NewMessage): Promise<void> {
   const group = registeredGroups[msg.chat_jid];
-  if (!group) return;
+  if (!group) {
+    logger.debug(
+      {
+        chat_jid: msg.chat_jid,
+        sender: msg.sender,
+        registered_jids: Object.keys(registeredGroups),
+      },
+      'Message from unregistered chat',
+    );
+    return;
+  }
 
   const content = msg.content.trim();
-  const isMainGroup = group.folder === MAIN_GROUP_FOLDER;
+  const isMainGroup = group.folder === MAIN_GROUP_FOLDER || group.isMain;
 
-  // Main group responds to all messages; other groups require trigger prefix
-  if (!isMainGroup && !TRIGGER_PATTERN.test(content)) return;
+  // Main group responds to all messages; other groups require trigger prefix or @mention
+  const hasTrigger = TRIGGER_PATTERN.test(content);
+
+  // Check if bot is mentioned in the message
+  let hasMention = false;
+  if (msg.mentions && sock?.user?.id) {
+    try {
+      const mentionedJids: string[] = JSON.parse(msg.mentions);
+      const botJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+      hasMention = mentionedJids.includes(botJid);
+    } catch {
+      // Ignore JSON parse errors
+    }
+  }
+
+  if (!isMainGroup && !hasTrigger && !hasMention) return;
 
   // Get all messages since last agent interaction so the session has full context
   const sinceTimestamp = lastAgentTimestamp[msg.chat_jid] || '';
@@ -229,7 +262,7 @@ async function runAgent(
   prompt: string,
   chatJid: string,
 ): Promise<string | null> {
-  const isMain = group.folder === MAIN_GROUP_FOLDER;
+  const isMain = group.folder === MAIN_GROUP_FOLDER || group.isMain === true;
   const sessionId = sessions[group.folder];
 
   // Update tasks snapshot for container to read (filtered by group)
@@ -727,6 +760,24 @@ async function connectWhatsApp(): Promise<void> {
   });
 
   sock.ev.on('creds.update', saveCreds);
+
+  // Build LID-to-phone mapping for all contacts (not just self)
+  sock.ev.on('lid-mapping.update', ({ lid, pn }) => {
+    const lidUser = lid.split('@')[0].split(':')[0];
+    const phoneJid = pn.includes('@') ? pn : `${pn}@s.whatsapp.net`;
+    lidToPhoneMap[lidUser] = phoneJid;
+    logger.debug({ lidUser, phoneJid }, 'LID mapping updated');
+  });
+
+  sock.ev.on('contacts.upsert', (contacts) => {
+    for (const contact of contacts) {
+      if (contact.lid && contact.id?.endsWith('@s.whatsapp.net')) {
+        const lidUser = contact.lid.split('@')[0].split(':')[0];
+        lidToPhoneMap[lidUser] = contact.id;
+      }
+    }
+    logger.debug({ mapSize: Object.keys(lidToPhoneMap).length }, 'LID map updated from contacts');
+  });
 
   sock.ev.on('messages.upsert', ({ messages }) => {
     for (const msg of messages) {
