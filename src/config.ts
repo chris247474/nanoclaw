@@ -54,3 +54,7 @@ export const CLAUDE_FALLBACK_MODEL = process.env.CLAUDE_FALLBACK_MODEL;
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 export const OPENAI_MODEL = process.env.OPENAI_MODEL;
 export const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL; // For OpenAI-compatible APIs
+
+// Media/file handling
+export const MAX_MEDIA_SIZE = 50 * 1024 * 1024; // 50MB
+export const FILE_RETENTION_DAYS = 30;

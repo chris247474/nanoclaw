@@ -55,6 +55,18 @@ export interface NewMessage {
   content: string;
   timestamp: string;
   mentions?: string | null;
+  media_type?: string | null;
+  media_path?: string | null;
+}
+
+export interface IpcFileMessage {
+  type: 'file';
+  chatJid: string;
+  filePath: string;       // Relative path within group dir (e.g., "reports/output.pdf")
+  caption?: string;
+  fileName?: string;      // Override display name
+  groupFolder: string;
+  timestamp: string;
 }
 
 export interface ScheduledTask {
