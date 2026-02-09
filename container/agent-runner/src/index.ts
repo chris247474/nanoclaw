@@ -225,10 +225,16 @@ async function main(): Promise<void> {
   let result: string | null = null;
   let newSessionId: string | undefined;
 
+  // Add progress update instructions for all tasks
+  let prompt = `[PROGRESS UPDATES: For tasks requiring significant work (research, analysis, file processing, multi-step operations), use mcp__nanoclaw__send_message to keep the chat informed:
+1. Send an immediate acknowledgment: what you'll do and approximate scope
+2. Send brief status updates at major milestones (e.g. "Finished reading the document, now analyzing financials...")
+3. Return your final answer as normal
+Skip updates for simple questions you can answer in one step.]\n\n${input.prompt}`;
+
   // Add context for scheduled tasks
-  let prompt = input.prompt;
   if (input.isScheduledTask) {
-    prompt = `[SCHEDULED TASK - You are running automatically, not in response to a user message. Use mcp__nanoclaw__send_message if needed to communicate with the user.]\n\n${input.prompt}`;
+    prompt = `[SCHEDULED TASK - You are running automatically, not in response to a user message. Use mcp__nanoclaw__send_message if needed to communicate with the user.]\n\n${prompt}`;
   }
 
   // Save original env vars for fallback

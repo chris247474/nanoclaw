@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { proto } from '@whiskeysockets/baileys';
+import { normalizeMessageContent, proto } from '@whiskeysockets/baileys';
 
 import { STORE_DIR } from './config.js';
 import { NewMessage, ScheduledTask, TaskRunLog } from './types.js';
@@ -202,16 +202,19 @@ export function storeMessage(
 ): void {
   if (!msg.key) return;
 
+  // Unwrap documentWithCaptionMessage, viewOnceMessage, etc.
+  const m = normalizeMessageContent(msg.message) || msg.message;
+
   const content =
-    msg.message?.conversation ||
-    msg.message?.extendedTextMessage?.text ||
-    msg.message?.imageMessage?.caption ||
-    msg.message?.videoMessage?.caption ||
-    msg.message?.documentMessage?.caption ||
+    m?.conversation ||
+    m?.extendedTextMessage?.text ||
+    m?.imageMessage?.caption ||
+    m?.videoMessage?.caption ||
+    m?.documentMessage?.caption ||
     '';
 
   // Extract mentions from the message
-  const contextInfo = msg.message?.extendedTextMessage?.contextInfo;
+  const contextInfo = m?.extendedTextMessage?.contextInfo;
   const mentionedJids = contextInfo?.mentionedJid || [];
   const mentions = mentionedJids.length > 0 ? JSON.stringify(mentionedJids) : null;
 

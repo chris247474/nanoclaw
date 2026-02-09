@@ -1,4 +1,4 @@
-import { downloadMediaMessage, type WAMessage } from '@whiskeysockets/baileys';
+import { downloadMediaMessage, normalizeMessageContent, type WAMessage } from '@whiskeysockets/baileys';
 import { proto } from '@whiskeysockets/baileys';
 import fs from 'fs';
 import path from 'path';
@@ -16,7 +16,8 @@ export interface MediaInfo {
 /** Extract media info from a WhatsApp message, or null if text-only/sticker */
 export function getMediaInfo(msg: proto.IWebMessageInfo): MediaInfo | null {
   if (!msg.message) return null;
-  const m = msg.message;
+  // Unwrap documentWithCaptionMessage, viewOnceMessage, etc.
+  const m = normalizeMessageContent(msg.message) || msg.message;
 
   // Skip stickers
   if (m.stickerMessage) return null;
