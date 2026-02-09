@@ -124,7 +124,8 @@ function buildVolumeMounts(
 
   // Environment file directory (workaround for Apple Container -i env var bug)
   // Only expose specific auth variables needed by Claude Code, not the entire .env
-  const envDir = path.join(DATA_DIR, 'env');
+  // Per-group env dirs allow model overrides (admin groups get Opus, others get Sonnet)
+  const envDir = path.join(DATA_DIR, 'env', group.folder);
   fs.mkdirSync(envDir, { recursive: true });
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
@@ -144,6 +145,17 @@ function buildVolumeMounts(
       if (!trimmed || trimmed.startsWith('#')) return false;
       return allowedVars.some((v) => trimmed.startsWith(`${v}=`));
     });
+
+    // Non-admin groups: override model to Sonnet 4.5 and remove fallback
+    // (fallback can't be the same as the main model — SDK rejects it)
+    if (!isMain) {
+      const nonAdminModel = process.env.CLAUDE_FALLBACK_MODEL || 'claude-sonnet-4-5-20250929';
+      const overriddenLines = filteredLines
+        .filter((line) => !line.trim().startsWith('CLAUDE_MODEL=') && !line.trim().startsWith('CLAUDE_FALLBACK_MODEL='))
+        .concat(`CLAUDE_MODEL=${nonAdminModel}`);
+      filteredLines.length = 0;
+      filteredLines.push(...overriddenLines);
+    }
 
     if (filteredLines.length > 0) {
       fs.writeFileSync(
