@@ -67,6 +67,62 @@ export function createIpcMcp(ctx: IpcMcpContext) {
       ),
 
       tool(
+        'send_file',
+        `Send a file to the current WhatsApp chat. The file must exist within /workspace/group/.
+Supports images, documents, videos, and audio. The file type is auto-detected from the extension.
+Maximum file size: 50MB.`,
+        {
+          file_path: z.string().describe('Path to the file within /workspace/group/ (e.g., "/workspace/group/reports/output.pdf")'),
+          caption: z.string().optional().describe('Optional caption/message to send with the file'),
+          file_name: z.string().optional().describe('Optional display name for the file (defaults to original filename)')
+        },
+        async (args) => {
+          // 1. Validate path is within /workspace/group/
+          const resolved = path.resolve(args.file_path);
+          if (!resolved.startsWith('/workspace/group/')) {
+            return {
+              content: [{ type: 'text' as const, text: 'Error: file_path must be within /workspace/group/' }],
+              isError: true
+            };
+          }
+
+          // 2. Validate file exists
+          if (!fs.existsSync(resolved)) {
+            return {
+              content: [{ type: 'text' as const, text: `Error: file not found: ${resolved}` }],
+              isError: true
+            };
+          }
+
+          // 3. Validate file size (50MB limit)
+          const stat = fs.statSync(resolved);
+          if (stat.size > 50 * 1024 * 1024) {
+            return {
+              content: [{ type: 'text' as const, text: `Error: file too large (${(stat.size / 1024 / 1024).toFixed(1)}MB). Max: 50MB.` }],
+              isError: true
+            };
+          }
+
+          // 4. Write IPC file message
+          const relativePath = path.relative('/workspace/group', resolved);
+          const data = {
+            type: 'file',
+            chatJid,
+            filePath: relativePath,
+            caption: args.caption,
+            fileName: args.file_name || path.basename(resolved),
+            groupFolder,
+            timestamp: new Date().toISOString()
+          };
+
+          const filename = writeIpcFile(MESSAGES_DIR, data);
+          return {
+            content: [{ type: 'text' as const, text: `File queued for delivery: ${path.basename(resolved)} (${filename})` }]
+          };
+        }
+      ),
+
+      tool(
         'schedule_task',
         `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools.
 
