@@ -12,6 +12,8 @@ import makeWASocket, {
 import {
   ASSISTANT_NAME,
   DATA_DIR,
+  FILE_RETENTION_DAYS,
+  GROUPS_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
   POLL_INTERVAL,
@@ -39,9 +41,10 @@ import {
   updateChatName,
 } from './db.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { NewMessage, RegisteredGroup, Session } from './types.js';
+import { IpcFileMessage, NewMessage, RegisteredGroup, Session } from './types.js';
 import { loadJson, saveJson } from './utils.js';
 import { logger } from './logger.js';
+import { downloadAndSaveMedia } from './media-handler.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -274,14 +277,20 @@ async function processMessage(msg: NewMessage): Promise<void> {
   );
 
   const lines = missedMessages.map((m) => {
-    // Escape XML special characters in content
     const escapeXml = (s: string) =>
       s
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
-    return `<message sender="${escapeXml(m.sender_name)}" time="${m.timestamp}">${escapeXml(m.content)}</message>`;
+    let attrs = `sender="${escapeXml(m.sender_name)}" time="${m.timestamp}"`;
+    if (m.media_type) {
+      attrs += ` media_type="${escapeXml(m.media_type)}"`;
+      // Convert host path to container path
+      const containerPath = m.media_path?.replace(/.*groups\/[^/]+\//, '/workspace/group/');
+      if (containerPath) attrs += ` file="${escapeXml(containerPath)}"`;
+    }
+    return `<message ${attrs}>${escapeXml(m.content)}</message>`;
   });
   const prompt = `<messages>\n${lines.join('\n')}\n</messages>`;
 
@@ -432,6 +441,17 @@ function startIpcWatcher(): void {
                     { chatJid: data.chatJid, sourceGroup },
                     'Unauthorized IPC message attempt blocked',
                   );
+                }
+              } else if (data.type === 'file' && data.chatJid && data.filePath) {
+                const { sendFileMessage } = await import('./file-sender.js');
+                const targetGroup = registeredGroups[data.chatJid];
+                if (isMain || (targetGroup && targetGroup.folder === sourceGroup)) {
+                  const success = await sendFileMessage(sock, data as IpcFileMessage, ASSISTANT_NAME);
+                  if (success) {
+                    logger.info({ chatJid: data.chatJid, file: data.filePath, sourceGroup }, 'IPC file sent');
+                  }
+                } else {
+                  logger.warn({ chatJid: data.chatJid, sourceGroup }, 'Unauthorized IPC file send blocked');
                 }
               }
               fs.unlinkSync(filePath);
@@ -801,6 +821,27 @@ async function connectWhatsApp(): Promise<void> {
       });
       startIpcWatcher();
       startMessageLoop();
+
+      // Periodic cleanup of old incoming media files
+      setInterval(() => {
+        const cutoff = Date.now() - FILE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+        for (const group of Object.values(registeredGroups)) {
+          const incomingDir = path.join(GROUPS_DIR, group.folder, 'files', 'incoming');
+          if (!fs.existsSync(incomingDir)) continue;
+          try {
+            for (const file of fs.readdirSync(incomingDir)) {
+              const filePath = path.join(incomingDir, file);
+              const stat = fs.statSync(filePath);
+              if (stat.mtimeMs < cutoff) {
+                fs.unlinkSync(filePath);
+                logger.debug({ file: filePath }, 'Cleaned up old media file');
+              }
+            }
+          } catch (err) {
+            logger.error({ err, group: group.folder }, 'Error cleaning up media files');
+          }
+        }
+      }, 24 * 60 * 60 * 1000); // Daily
     }
   });
 
@@ -824,7 +865,7 @@ async function connectWhatsApp(): Promise<void> {
     logger.debug({ mapSize: Object.keys(lidToPhoneMap).length }, 'LID map updated from contacts');
   });
 
-  sock.ev.on('messages.upsert', ({ messages }) => {
+  sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const msg of messages) {
       if (!msg.message) continue;
       const rawJid = msg.key.remoteJid;
@@ -832,7 +873,7 @@ async function connectWhatsApp(): Promise<void> {
 
       // Translate LID JID to phone JID if applicable
       const chatJid = translateJid(rawJid);
-      
+
       const timestamp = new Date(
         Number(msg.messageTimestamp) * 1000,
       ).toISOString();
@@ -842,11 +883,20 @@ async function connectWhatsApp(): Promise<void> {
 
       // Store messages for registered groups and all group chats (for auto-registration)
       if (registeredGroups[chatJid] || chatJid.endsWith('@g.us')) {
+        // For registered groups, download media if present
+        let mediaResult: { filePath: string; mediaType: string; caption: string } | null = null;
+        if (registeredGroups[chatJid]) {
+          const group = registeredGroups[chatJid];
+          mediaResult = await downloadAndSaveMedia(msg, group.folder);
+        }
+
         storeMessage(
           msg,
           chatJid,
           msg.key.fromMe || false,
           msg.pushName || undefined,
+          mediaResult?.mediaType,
+          mediaResult?.filePath,
         );
       }
     }
