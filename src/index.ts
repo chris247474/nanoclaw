@@ -19,6 +19,7 @@ import {
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
+import { detectRuntime } from './container-runtime.js';
 import {
   AvailableGroup,
   runContainerAgent,
@@ -770,7 +771,7 @@ async function connectWhatsApp(): Promise<void> {
       }
     } else if (connection === 'open') {
       logger.info('Connected to WhatsApp');
-      
+
       // Build LID to phone mapping from auth state for self-chat translation
       if (sock.user) {
         const phoneUser = sock.user.id.split(':')[0];
@@ -780,7 +781,7 @@ async function connectWhatsApp(): Promise<void> {
           logger.debug({ lidUser, phoneUser }, 'LID to phone mapping set');
         }
       }
-      
+
       // Sync group metadata on startup (respects 24h cache)
       syncGroupMetadata().catch((err) =>
         logger.error({ err }, 'Initial group sync failed'),
@@ -821,7 +822,10 @@ async function connectWhatsApp(): Promise<void> {
         lidToPhoneMap[lidUser] = contact.id;
       }
     }
-    logger.debug({ mapSize: Object.keys(lidToPhoneMap).length }, 'LID map updated from contacts');
+    logger.debug(
+      { mapSize: Object.keys(lidToPhoneMap).length },
+      'LID map updated from contacts',
+    );
   });
 
   sock.ev.on('messages.upsert', ({ messages }) => {
@@ -832,7 +836,7 @@ async function connectWhatsApp(): Promise<void> {
 
       // Translate LID JID to phone JID if applicable
       const chatJid = translateJid(rawJid);
-      
+
       const timestamp = new Date(
         Number(msg.messageTimestamp) * 1000,
       ).toISOString();
@@ -896,48 +900,45 @@ async function startMessageLoop(): Promise<void> {
   }
 }
 
-function ensureContainerSystemRunning(): void {
+function ensureContainerRuntimeAvailable(): void {
+  const runtime = detectRuntime();
+  const checkCmd = runtime.checkCommand();
+
   try {
-    execSync('container system status', { stdio: 'pipe' });
-    logger.debug('Apple Container system already running');
+    execSync(checkCmd.join(' '), { stdio: 'pipe' });
+    logger.debug({ runtime: runtime.name }, 'Container runtime available');
   } catch {
-    logger.info('Starting Apple Container system...');
-    try {
-      execSync('container system start', { stdio: 'pipe', timeout: 30000 });
-      logger.info('Apple Container system started');
-    } catch (err) {
-      logger.error({ err }, 'Failed to start Apple Container system');
-      console.error(
-        '\n╔════════════════════════════════════════════════════════════════╗',
-      );
-      console.error(
-        '║  FATAL: Apple Container system failed to start                 ║',
-      );
-      console.error(
-        '║                                                                ║',
-      );
-      console.error(
-        '║  Agents cannot run without Apple Container. To fix:           ║',
-      );
-      console.error(
-        '║  1. Install from: https://github.com/apple/container/releases ║',
-      );
-      console.error(
-        '║  2. Run: container system start                               ║',
-      );
-      console.error(
-        '║  3. Restart NanoClaw                                          ║',
-      );
-      console.error(
-        '╚════════════════════════════════════════════════════════════════╝\n',
-      );
-      throw new Error('Apple Container system is required but failed to start');
+    if (runtime.name === 'apple-container') {
+      // Apple Container may need to be started
+      logger.info('Starting Apple Container system...');
+      try {
+        execSync('container system start', { stdio: 'pipe', timeout: 30000 });
+        logger.info('Apple Container system started');
+        return;
+      } catch {
+        // Fall through to error
+      }
     }
+
+    console.error(
+      `\nFATAL: Container runtime "${runtime.name}" is not available.`,
+    );
+    console.error(`Command failed: ${checkCmd.join(' ')}`);
+    if (runtime.name === 'apple-container') {
+      console.error(
+        'Install from: https://github.com/apple/container/releases',
+      );
+    } else {
+      console.error('Install Docker: https://docs.docker.com/get-docker/');
+    }
+    throw new Error(
+      `Container runtime "${runtime.name}" is required but not available`,
+    );
   }
 }
 
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
+  ensureContainerRuntimeAvailable();
   initDatabase();
   logger.info('Database initialized');
   loadState();

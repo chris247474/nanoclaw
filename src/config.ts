@@ -47,7 +47,8 @@ export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 // Model configuration
-export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929';
+export const CLAUDE_MODEL =
+  process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929';
 export const CLAUDE_FALLBACK_MODEL = process.env.CLAUDE_FALLBACK_MODEL;
 
 // 3rd party model support (OpenAI, etc.)

@@ -1,6 +1,7 @@
 /**
  * Container Runner for NanoClaw
- * Spawns agent execution in Apple Container and handles IPC
+ * Spawns agent execution in an isolated container and handles IPC.
+ * Supports Apple Container (macOS) and Docker (Linux) via runtime abstraction.
  */
 import { spawn } from 'child_process';
 import fs from 'fs';
@@ -14,6 +15,7 @@ import {
   DATA_DIR,
   GROUPS_DIR,
 } from './config.js';
+import { detectRuntime } from './container-runtime.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
@@ -184,23 +186,8 @@ function buildVolumeMounts(
 }
 
 function buildContainerArgs(mounts: VolumeMount[]): string[] {
-  const args: string[] = ['run', '-i', '--rm'];
-
-  // Apple Container: --mount for readonly, -v for read-write
-  for (const mount of mounts) {
-    if (mount.readonly) {
-      args.push(
-        '--mount',
-        `type=bind,source=${mount.hostPath},target=${mount.containerPath},readonly`,
-      );
-    } else {
-      args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
-    }
-  }
-
-  args.push(CONTAINER_IMAGE);
-
-  return args;
+  const runtime = detectRuntime();
+  return runtime.runArgs(mounts, CONTAINER_IMAGE);
 }
 
 export async function runContainerAgent(
@@ -240,7 +227,8 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const container = spawn('container', containerArgs, {
+    const runtime = detectRuntime();
+    const container = spawn(runtime.command, containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
