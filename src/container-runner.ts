@@ -96,6 +96,38 @@ function buildVolumeMounts(
     }
   }
 
+  // Gmail credentials directory (main only - tokens needed for Gmail MCP)
+  if (isMain) {
+    const gmailDir = path.join(homeDir, '.gmail-mcp');
+    if (fs.existsSync(gmailDir)) {
+      mounts.push({
+        hostPath: gmailDir,
+        containerPath: '/home/node/.gmail-mcp',
+        readonly: false,  // MCP may need to refresh tokens
+      });
+    }
+
+    // Google Calendar tokens directory
+    const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
+    if (fs.existsSync(calendarDir)) {
+      mounts.push({
+        hostPath: calendarDir,
+        containerPath: '/home/node/.config/google-calendar-mcp',
+        readonly: false,  // MCP may need to refresh tokens
+      });
+    }
+
+    // Google Drive credentials directory
+    const gdriveDir = path.join(homeDir, '.config', 'google-drive-mcp');
+    if (fs.existsSync(gdriveDir)) {
+      mounts.push({
+        hostPath: gdriveDir,
+        containerPath: '/home/node/.config/google-drive-mcp',
+        readonly: false,  // MCP may need to refresh tokens
+      });
+    }
+  }
+
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(

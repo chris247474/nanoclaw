@@ -36,7 +36,7 @@ RUN npm install -g agent-browser @anthropic-ai/claude-code figma-developer-mcp
 WORKDIR /app
 
 # Copy package files first for better caching
-COPY agent-runner/package*.json ./
+COPY agent-runner/package.json agent-runner/package-lock.json ./
 
 # Install dependencies
 RUN npm install

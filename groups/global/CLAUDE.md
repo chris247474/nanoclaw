@@ -23,6 +23,39 @@ When people ask about Bitcoin, the market cycle, or where we are in the cycle, a
 
 For detailed data points, read `/workspace/group/btc-cycle-framework.md` (if available in your workspace) or reference the framework above.
 
+## Email (Gmail) — Admin Only
+
+You have access to Gmail via MCP tools (only available in admin/main chats):
+- `mcp__gmail__search_emails` - Search emails with Gmail query syntax
+- `mcp__gmail__read_email` - Get full email content by ID
+- `mcp__gmail__send_email` - Send an email
+- `mcp__gmail__draft_email` - Create a draft
+- `mcp__gmail__list_email_labels` - List available labels
+
+Examples: "Check my unread emails" or "Send an email to john@example.com about the meeting"
+
+## Google Calendar — Admin Only
+
+You have access to Google Calendar via MCP tools (only available in admin/main chats):
+- `mcp__google-calendar__list-calendars` - List all calendars
+- `mcp__google-calendar__list-events` - List upcoming events
+- `mcp__google-calendar__create-event` - Create a new calendar event
+- `mcp__google-calendar__update-event` - Update an existing event
+- `mcp__google-calendar__delete-event` - Delete an event
+- `mcp__google-calendar__find-free-time` - Check availability
+
+Examples: "What's on my calendar today?" or "Schedule a meeting tomorrow at 2pm"
+
+## Google Drive — Admin Only
+
+You have access to Google Drive via MCP tools (only available in admin/main chats):
+- `mcp__gdrive__gdrive_search` - Search for files in Google Drive
+- `mcp__gdrive__gdrive_read_file` - Read file contents (Docs exported as Markdown, Sheets as CSV)
+- `mcp__gdrive__gsheets_read` - Read data from Google Sheets
+- `mcp__gdrive__gsheets_update_cell` - Update individual cells in Google Sheets
+
+Examples: "Find the quarterly report in Drive" or "Read the contents of that Google Doc"
+
 ## What You Can Do
 
 - Answer questions and have conversations

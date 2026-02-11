@@ -226,11 +226,12 @@ async function main(): Promise<void> {
   let newSessionId: string | undefined;
 
   // Add progress update instructions for all tasks
-  let prompt = `[PROGRESS UPDATES: For tasks requiring significant work (research, analysis, file processing, multi-step operations), use mcp__nanoclaw__send_message to keep the chat informed:
-1. Send an immediate acknowledgment: what you'll do and approximate scope
-2. Send brief status updates at major milestones (e.g. "Finished reading the document, now analyzing financials...")
-3. Return your final answer as normal
-Skip updates for simple questions you can answer in one step.]\n\n${input.prompt}`;
+  // IMPORTANT: When send_message is used, the final return value is suppressed to avoid duplicates.
+  // So if you send progress updates, your final answer MUST also go through send_message.
+  let prompt = `[RESPONSE RULES:
+- For simple questions (quick lookups, short answers, confirmations): just return your answer directly. Do NOT use mcp__nanoclaw__send_message.
+- For tasks taking >30 seconds (research, multi-step operations, file processing): use mcp__nanoclaw__send_message for ALL responses including your final answer. Your return value will be suppressed if any send_message was used.
+- Rule: either use send_message for everything OR don't use it at all. Never mix both.]\n\n${input.prompt}`;
 
   // Add context for scheduled tasks
   if (input.isScheduledTask) {
@@ -280,14 +281,37 @@ Skip updates for simple questions you can answer in one step.]\n\n${input.prompt
       nanoclaw: ipcMcp
     };
 
-    // Add Google Workspace MCP if credentials exist (main only)
-    const googleCredsPath = '/workspace/project/data/google_client_secret.json';
-    if (input.isMain && fs.existsSync(googleCredsPath)) {
-      mcpServers['google-workspace'] = {
+    // Add Gmail MCP if credentials exist (main only)
+    const gmailCredsPath = '/home/node/.gmail-mcp/credentials.json';
+    if (input.isMain && fs.existsSync(gmailCredsPath)) {
+      mcpServers['gmail'] = {
         command: 'npx',
-        args: ['-y', '@presto-ai/google-workspace-mcp'],
+        args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp']
+      };
+    }
+
+    // Add Google Calendar MCP if tokens exist (main only)
+    const calendarTokensPath = '/home/node/.config/google-calendar-mcp/tokens.json';
+    if (input.isMain && fs.existsSync(calendarTokensPath)) {
+      mcpServers['google-calendar'] = {
+        command: 'npx',
+        args: ['-y', '@cocal/google-calendar-mcp'],
         env: {
-          GOOGLE_OAUTH_CREDENTIALS: googleCredsPath
+          GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+          GOOGLE_CALENDAR_MCP_TOKEN_PATH: calendarTokensPath
+        }
+      };
+    }
+
+    // Add Google Drive MCP if tokens exist (main only)
+    const gdriveTokensPath = '/home/node/.config/google-drive-mcp/tokens.json';
+    if (input.isMain && fs.existsSync(gdriveTokensPath)) {
+      mcpServers['gdrive'] = {
+        command: 'npx',
+        args: ['-y', '@piotr-agier/google-drive-mcp'],
+        env: {
+          GOOGLE_DRIVE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+          GOOGLE_DRIVE_MCP_TOKEN_PATH: gdriveTokensPath
         }
       };
     }
@@ -311,7 +335,9 @@ Skip updates for simple questions you can answer in one step.]\n\n${input.prompt
         'Read', 'Write', 'Edit', 'Glob', 'Grep',
         'WebSearch', 'WebFetch',
         'mcp__nanoclaw__*',
-        'mcp__google-workspace__*',
+        'mcp__gmail__*',
+        'mcp__google-calendar__*',
+        'mcp__gdrive__*',
         'mcp__figma__*'
       ],
       permissionMode: 'bypassPermissions' as const,

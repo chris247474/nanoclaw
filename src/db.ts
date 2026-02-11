@@ -213,8 +213,15 @@ export function storeMessage(
     m?.documentMessage?.caption ||
     '';
 
-  // Extract mentions from the message
-  const contextInfo = m?.extendedTextMessage?.contextInfo;
+  // Extract mentions from the message (check all message types that can contain mentions)
+  const contextInfo =
+    m?.extendedTextMessage?.contextInfo ||
+    m?.imageMessage?.contextInfo ||
+    m?.videoMessage?.contextInfo ||
+    m?.documentMessage?.contextInfo ||
+    m?.listResponseMessage?.contextInfo ||
+    m?.buttonsResponseMessage?.contextInfo ||
+    (m as any)?.contextInfo;
   const mentionedJids = contextInfo?.mentionedJid || [];
   const mentions = mentionedJids.length > 0 ? JSON.stringify(mentionedJids) : null;
 

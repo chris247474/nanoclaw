@@ -1,0 +1,345 @@
+const fs = require('fs');
+
+// Simple HTML to PDF conversion using basic HTML/CSS
+const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page {
+            size: A4;
+            margin: 2cm;
+        }
+        body {
+            font-family: 'Helvetica', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #1a1a1a;
+            text-align: center;
+            font-size: 24px;
+            margin-bottom: 20px;
+            border-bottom: 3px solid #2c3e50;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #2c3e50;
+            font-size: 18px;
+            margin-top: 25px;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #ecf0f1;
+            padding-bottom: 5px;
+        }
+        h3 {
+            color: #34495e;
+            font-size: 14px;
+            margin-top: 15px;
+            margin-bottom: 10px;
+        }
+        .metadata {
+            background: #f8f9fa;
+            padding: 15px;
+            border-left: 4px solid #3498db;
+            margin-bottom: 20px;
+        }
+        .alert {
+            background: #fee;
+            border-left: 4px solid #e74c3c;
+            padding: 15px;
+            margin: 15px 0;
+            font-weight: bold;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        ul {
+            margin: 10px 0;
+            padding-left: 25px;
+        }
+        li {
+            margin: 5px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th {
+            background: #34495e;
+            color: white;
+            padding: 12px;
+            text-align: center;
+            font-size: 12px;
+        }
+        td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: center;
+            font-size: 11px;
+        }
+        tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+        tr:last-child {
+            background: #bdc3c7;
+            font-weight: bold;
+        }
+        .footer {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            font-size: 10px;
+            color: #666;
+            font-style: italic;
+        }
+        .page-break {
+            page-break-after: always;
+        }
+        strong {
+            color: #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    <h1>Investment Due Diligence Summary</h1>
+    
+    <div class="metadata">
+        <strong>Target:</strong> Cash-based retail/service business (₱21M annual sales)<br>
+        <strong>Analysis Date:</strong> February 9, 2026<br>
+        <strong>Analyst:</strong> Verch (PE Fund Due Diligence)
+    </div>
+
+    <h2>Executive Summary</h2>
+    <div class="alert">
+        This is a <strong>HARD PASS</strong> or requires immediate forensic audit before any valuation discussion. 
+        The company shows deteriorating financial controls with <strong>₱26.99M (47% of total sales) unaccounted for</strong> 
+        across 2022-2024. 2024 shows catastrophic collapse in deposit discipline.
+    </div>
+
+    <h2>Critical Red Flags</h2>
+
+    <h3>1. Fraud/Embezzlement Risk - CRITICAL</h3>
+    <ul>
+        <li><strong>₱13.6M missing in 2024 alone</strong> (64% of sales undeposited)</li>
+        <li>Deposit ratio collapsed from 65% (2023) to 36% (2024) despite stable sales</li>
+        <li>Every single month in 2024 showed under-deposits — systematic pattern, not random variance</li>
+        <li>July 2024: ₱1.61M single-month gap (76% unaccounted)</li>
+    </ul>
+    <div class="alert">
+        <strong>Assessment:</strong> This pattern screams internal theft or systematic diversion of cash.
+    </div>
+
+    <h3>2. No Financial Controls</h3>
+    <ul>
+        <li>No daily reconciliation evident</li>
+        <li>No documented deposit proof/audit trail mentioned</li>
+        <li>"Over-deposits" in some months (2023: Aug/Sep/Oct) suggest retroactive adjustments to hide shortfalls</li>
+        <li>Sales data exists but cash doesn't reach the bank = zero accountability</li>
+    </ul>
+
+    <h3>3. Working Capital Black Hole</h3>
+    <ul>
+        <li>₱26.99M cumulative unexplained difference = <strong>1.3x annual sales</strong></li>
+        <li>If cash isn't stolen, where is it? COGS? Undisclosed expenses? Off-book operations?</li>
+        <li>No inventory/AP/AR context provided to explain cash burn</li>
+    </ul>
+
+    <h3>4. Management Dysfunction</h3>
+    <ul>
+        <li>2024 shows no corrective action despite worsening trend</li>
+        <li>Report prepared by "Maydeline del Rosario" (bookkeeper?) — no CFO/controller oversight evident</li>
+        <li>Recommendations are basic hygiene (daily reconciliation, deposit slips) = these don't exist now</li>
+    </ul>
+
+    <h2>Deal-Killer Questions</h2>
+
+    <h3>1. Where is the ₱26.99M?</h3>
+    <ul>
+        <li><strong>If embezzled</strong> → fraud liability, potential lawsuits, criminal exposure</li>
+        <li><strong>If legitimate expenses</strong> → EBITDA is fictitious, business is cash-flow negative</li>
+        <li><strong>If tied up in inventory/AR</strong> → working capital crisis</li>
+    </ul>
+
+    <h3>2. Why did 2024 collapse?</h3>
+    <ul>
+        <li>Key employee quit/fired?</li>
+        <li>Owner health issue reducing oversight?</li>
+        <li>Business model change (credit sales not captured)?</li>
+    </ul>
+
+    <h3>3. Are sales figures real?</h3>
+    <ul>
+        <li>If deposits don't match sales, who verified the sales data?</li>
+        <li>Could be inflated top-line to mask declining business</li>
+    </ul>
+
+    <h3>4. What's the actual profitability?</h3>
+    <ul>
+        <li>No P&L, no COGS, no expense breakdown</li>
+        <li>Reported sales mean nothing if cash doesn't materialize</li>
+    </ul>
+
+    <h2>Valuation Impact</h2>
+    <p><strong>Current asking price:</strong> TBD</p>
+    <div class="alert">
+        <strong>Adjusted value:</strong> ₱0 until proven otherwise
+    </div>
+    <ul>
+        <li>Cannot value a business where 47% of revenue disappears</li>
+        <li>Enterprise value = recoverable assets (inventory, equipment, customer base) minus fraud liabilities</li>
+        <li>Likely worth only <strong>liquidation value</strong> unless audit clears the ₱26.99M</li>
+    </ul>
+
+    <div class="page-break"></div>
+
+    <h2>Mitigation Strategy (If You Still Want This Deal)</h2>
+
+    <h3>Immediate Actions (Pre-LOI)</h3>
+    
+    <p><strong>1. Forensic Audit</strong></p>
+    <p><strong>Timeline:</strong> 2-3 weeks | <strong>Cost:</strong> ₱200K-500K</p>
+    <p><strong>Scope:</strong></p>
+    <ul>
+        <li>Trace ₱26.99M: bank statements, personal accounts, inventory purchases, supplier payments</li>
+        <li>Interview staff confidentially (someone knows where the cash went)</li>
+        <li>Review POS data vs bank deposits by day</li>
+    </ul>
+
+    <p><strong>2. Seller Representations & Warranties</strong></p>
+    <ul>
+        <li>Personal guarantee from owner for undisclosed liabilities</li>
+        <li>Holdback 50%+ of purchase price in escrow for 24 months</li>
+        <li>Right to clawback if fraud discovered</li>
+    </ul>
+
+    <p><strong>3. Staff Interviews</strong></p>
+    <ul>
+        <li>Meet the cashiers, bookkeeper, anyone handling money</li>
+        <li>Assess if this is known/tolerated vs management complicity</li>
+    </ul>
+
+    <h3>Post-Acquisition Actions (If Deal Proceeds)</h3>
+
+    <p><strong>1. Install Controls Day 1</strong></p>
+    <ul>
+        <li>New POS system with real-time bank integration</li>
+        <li>Daily manager reconciliation (sales vs deposits vs register count)</li>
+        <li>Segregate duties: different people handle cash, record sales, make deposits</li>
+    </ul>
+
+    <p><strong>2. Replace Entire Finance Function</strong></p>
+    <ul>
+        <li>Bring in your own CFO/controller</li>
+        <li>Assume current bookkeeper is compromised (complicit or incompetent)</li>
+    </ul>
+
+    <p><strong>3. Customer Revenue Audit</strong></p>
+    <ul>
+        <li><strong>If B2B:</strong> verify receivables with customers</li>
+        <li><strong>If retail:</strong> install cameras on registers, mystery shoppers</li>
+    </ul>
+
+    <h2>Financial Summary (2022-2024)</h2>
+
+    <table>
+        <tr>
+            <th>Year</th>
+            <th>Total Sales</th>
+            <th>Total Deposited</th>
+            <th>Difference</th>
+            <th>Deposit Ratio</th>
+        </tr>
+        <tr>
+            <td>2022</td>
+            <td>₱14,356,353</td>
+            <td>₱8,561,101</td>
+            <td>₱5,795,252</td>
+            <td>60%</td>
+        </tr>
+        <tr>
+            <td>2023</td>
+            <td>₱21,813,012</td>
+            <td>₱14,188,953</td>
+            <td>₱7,624,059</td>
+            <td>65%</td>
+        </tr>
+        <tr>
+            <td>2024</td>
+            <td>₱21,269,857</td>
+            <td>₱7,672,424</td>
+            <td>₱13,597,433</td>
+            <td>36%</td>
+        </tr>
+        <tr>
+            <td><strong>Total</strong></td>
+            <td><strong>₱57,439,222</strong></td>
+            <td><strong>₱30,422,478</strong></td>
+            <td><strong>₱26,999,744</strong></td>
+            <td><strong>53%</strong></td>
+        </tr>
+    </table>
+
+    <h3>Key Observations:</h3>
+    <ul>
+        <li>Sales grew 48% from 2022 to 2023 (healthy growth)</li>
+        <li>Sales flat in 2024 (-2.5% YoY)</li>
+        <li><strong style="color: #e74c3c;">Deposits collapsed 46% in 2024 despite stable sales</strong></li>
+        <li><strong style="color: #e74c3c;">2024 gap (₱13.6M) is 2.3x larger than 2023 gap (₱7.6M)</strong></li>
+    </ul>
+
+    <div class="page-break"></div>
+
+    <h2>Bottom Line</h2>
+    <h3>Do Not Proceed Without Full Explanation of the ₱26.99M</h3>
+    
+    <p>This isn't "weak controls" — this is a business where half the cash vanishes. You'd be buying a liability unless the owner can prove:</p>
+    <ol>
+        <li>The missing cash went to legitimate business expenses (and show receipts), <strong>OR</strong></li>
+        <li>They've already recovered the funds and prosecuted the fraudster, <strong>OR</strong></li>
+        <li>They'll discount the purchase price by ₱26.99M + a fraud risk premium (50%+ haircut)</li>
+    </ol>
+
+    <p>Even then, the infrastructure to allow this level of leakage means you're buying a <strong>turnaround project</strong>, not a performing asset.</p>
+
+    <h3>Investment Required for Professionalization:</h3>
+    <ul>
+        <li><strong>Timeline:</strong> 12-18 months</li>
+        <li><strong>Cost:</strong> ₱2-3M for systems, controls, and management team</li>
+        <li><strong>Risk:</strong> High execution risk given current state</li>
+    </ul>
+
+    <h3>Opportunity Cost:</h3>
+    <p>Time spent investigating this mess could be spent on cleaner deals with audited financials.</p>
+
+    <h2>Recommendation</h2>
+    <div class="alert">
+        <strong>PASS</strong> — unless seller provides:
+        <ul>
+            <li>Complete forensic audit results (at their expense)</li>
+            <li>Full explanation with supporting documentation for ₱26.99M</li>
+            <li>50%+ purchase price discount to compensate for fraud risk and turnaround effort</li>
+        </ul>
+    </div>
+
+    <div class="warning">
+        <strong>Risk Rating:</strong> ⚠️ EXTREME<br>
+        <strong>Priority:</strong> Low (investigate only if no better alternatives)
+    </div>
+
+    <div class="footer">
+        This analysis is based on the "Sales vs. Deposits Summary Report (2022-2024)" prepared by Maydeline del Rosario. 
+        Additional due diligence required before making any investment decision.
+    </div>
+</body>
+</html>
+`;
+
+fs.writeFileSync('due_diligence_report.html', html);
+console.log('HTML report generated: due_diligence_report.html');

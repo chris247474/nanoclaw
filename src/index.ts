@@ -58,6 +58,8 @@ let lidToPhoneMap: Record<string, string> = {};
 // Guards to prevent duplicate loops on WhatsApp reconnect
 let messageLoopRunning = false;
 let ipcWatcherRunning = false;
+// Track IPC messages sent per chat to suppress duplicate final result
+let ipcMessagesSent: Record<string, number> = {};
 let groupSyncTimerStarted = false;
 
 /**
@@ -200,8 +202,9 @@ async function processMessage(msg: NewMessage): Promise<void> {
     if (msg.mentions && sock?.user?.id) {
       try {
         const mentionedJids: string[] = JSON.parse(msg.mentions);
-        const botJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-        hasMention = mentionedJids.includes(botJid);
+        const botPhoneJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+        const botLidJid = sock.user.lid ? sock.user.lid.split(':')[0] + '@lid' : '';
+        hasMention = mentionedJids.includes(botPhoneJid) || (!!botLidJid && mentionedJids.includes(botLidJid));
       } catch {
         // Ignore JSON parse errors
       }
@@ -255,12 +258,14 @@ async function processMessage(msg: NewMessage): Promise<void> {
   const hasTrigger = TRIGGER_PATTERN.test(content);
 
   // Check if bot is mentioned in the message
+  // WhatsApp can send mentions as either phone JID (@s.whatsapp.net) or LID (@lid)
   let hasMention = false;
   if (msg.mentions && sock?.user?.id) {
     try {
       const mentionedJids: string[] = JSON.parse(msg.mentions);
-      const botJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
-      hasMention = mentionedJids.includes(botJid);
+      const botPhoneJid = sock.user.id.split(':')[0] + '@s.whatsapp.net';
+      const botLidJid = sock.user.lid ? sock.user.lid.split(':')[0] + '@lid' : '';
+      hasMention = mentionedJids.includes(botPhoneJid) || (!!botLidJid && mentionedJids.includes(botLidJid));
     } catch {
       // Ignore JSON parse errors
     }
@@ -307,7 +312,18 @@ async function processMessage(msg: NewMessage): Promise<void> {
 
   if (response) {
     lastAgentTimestamp[msg.chat_jid] = msg.timestamp;
-    await sendMessage(msg.chat_jid, `${ASSISTANT_NAME}: ${response}`);
+    // Only send the final result if no IPC messages were already sent during this run
+    // (IPC messages already delivered the response progressively)
+    const ipcCount = ipcMessagesSent[msg.chat_jid] || 0;
+    if (ipcCount === 0) {
+      await sendMessage(msg.chat_jid, `${ASSISTANT_NAME}: ${response}`);
+    } else {
+      logger.info(
+        { chatJid: msg.chat_jid, ipcCount, resultLength: response.length },
+        'Suppressed final result (already sent via IPC)',
+      );
+    }
+    delete ipcMessagesSent[msg.chat_jid];
   }
 }
 
@@ -432,6 +448,7 @@ function startIpcWatcher(): void {
                     data.chatJid,
                     `${ASSISTANT_NAME}: ${data.text}`,
                   );
+                  ipcMessagesSent[data.chatJid] = (ipcMessagesSent[data.chatJid] || 0) + 1;
                   logger.info(
                     { chatJid: data.chatJid, sourceGroup },
                     'IPC message sent',
