@@ -16,6 +16,7 @@ import {
   GROUPS_DIR,
   IPC_POLL_INTERVAL,
   MAIN_GROUP_FOLDER,
+  ORG_CONFIG_PATH,
   POLL_INTERVAL,
   STORE_DIR,
   TIMEZONE,
@@ -23,10 +24,13 @@ import {
 } from './config.js';
 import {
   AvailableGroup,
+  OrgMountContext,
   runContainerAgent,
   writeGroupsSnapshot,
+  writeOrgContext,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { loadOrgConfig, findTeamByJid, findTeamByGroupName, isAdminJid, isAdminGroupName } from './org-config.js';
 import {
   getAllChats,
   getAllTasks,
@@ -41,10 +45,12 @@ import {
   updateChatName,
 } from './db.js';
 import { startSchedulerLoop } from './task-scheduler.js';
-import { IpcFileMessage, NewMessage, RegisteredGroup, Session } from './types.js';
+import { IpcFileMessage, NewMessage, OrgConfig, RegisteredGroup, Session } from './types.js';
 import { loadJson, saveJson } from './utils.js';
 import { logger } from './logger.js';
 import { downloadAndSaveMedia } from './media-handler.js';
+import { addPendingRequest, isPending, loadPendingRequests, removePendingRequest } from './pending-dm.js';
+import { createOAuthSession, startOAuthServer, type OAuthService } from './oauth-server.js';
 
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -53,6 +59,7 @@ let lastTimestamp = '';
 let sessions: Session = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
+let orgConfig: OrgConfig | null = null;
 // LID to phone number mapping (WhatsApp now sends LID JIDs for self-chats)
 let lidToPhoneMap: Record<string, string> = {};
 // Guards to prevent duplicate loops on WhatsApp reconnect
@@ -126,11 +133,27 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   saveJson(path.join(DATA_DIR, 'registered_groups.json'), registeredGroups);
 
   // Create group folder
-  const groupDir = path.join(DATA_DIR, '..', 'groups', group.folder);
+  const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
 
+  // DM users: create credential directories and welcome CLAUDE.md
+  if (group.isDm) {
+    const credsBase = path.join(groupDir, '.credentials');
+    fs.mkdirSync(path.join(credsBase, 'gmail-mcp'), { recursive: true });
+    fs.mkdirSync(path.join(credsBase, 'google-calendar-mcp'), { recursive: true });
+    fs.mkdirSync(path.join(credsBase, 'google-drive-mcp'), { recursive: true });
+
+    const claudeMdPath = path.join(groupDir, 'CLAUDE.md');
+    if (!fs.existsSync(claudeMdPath)) {
+      fs.writeFileSync(
+        claudeMdPath,
+        `# DM User - ${group.name}\n\nYou are ${ASSISTANT_NAME}, a personal assistant for this user.\n\n## Capabilities\n\n- Gmail access (read, search, send, draft emails via MCP)\n- Google Calendar access (view, create, update, delete events via MCP)\n- Google Drive access (search, read files, read/write Sheets via MCP)\n- Web search and information lookup\n- File operations within your workspace\n- Schedule recurring tasks\n\n## Setup Required\n\nThis is a new DM registration. The user may need to set up Google integrations.\nCredentials are stored in /workspace/group/.credentials/\n\n## Guidelines\n\n- Be helpful and proactive\n- Provide clear, actionable responses\n- Use WhatsApp-friendly formatting\n- Your data is isolated from other users\n`,
+      );
+    }
+  }
+
   logger.info(
-    { jid, name: group.name, folder: group.folder },
+    { jid, name: group.name, folder: group.folder, isDm: group.isDm },
     'Group registered',
   );
 }
@@ -239,6 +262,39 @@ async function processMessage(msg: NewMessage): Promise<void> {
     }
   }
 
+  // DM registration request: any unregistered DM → create pending request for admin approval
+  if (!group && (msg.chat_jid.endsWith('@s.whatsapp.net') || msg.chat_jid.endsWith('@lid'))) {
+    const dmContent = msg.content.trim();
+
+    if (!isPending(msg.chat_jid)) {
+      const phone = msg.chat_jid.split('@')[0];
+      addPendingRequest({
+        jid: msg.chat_jid,
+        senderName: msg.sender_name,
+        requestedAt: msg.timestamp,
+        triggerMessage: msg.content,
+        phone,
+      });
+
+      // Notify admin's main chat
+      const mainJid = Object.keys(registeredGroups).find(
+        (jid) => registeredGroups[jid].folder === MAIN_GROUP_FOLDER,
+      );
+      if (mainJid) {
+        await sendMessage(
+          mainJid,
+          `${ASSISTANT_NAME}: New DM registration request from ${msg.sender_name || phone} (${phone}).\nMessage: "${dmContent}"\n\nTo approve, use register_group with JID: ${msg.chat_jid}, folder: dm-${phone}`,
+        );
+      }
+
+      logger.info(
+        { jid: msg.chat_jid, phone, senderName: msg.sender_name },
+        'DM registration request created',
+      );
+    }
+    return;
+  }
+
   if (!group) {
     logger.debug(
       {
@@ -271,7 +327,8 @@ async function processMessage(msg: NewMessage): Promise<void> {
     }
   }
 
-  if (!isMainGroup && !hasTrigger && !hasMention) return;
+  const shouldAlwaysProcess = isMainGroup || group.alwaysProcess;
+  if (!shouldAlwaysProcess && !hasTrigger && !hasMention) return;
 
   // Get all messages since last agent interaction so the session has full context
   const sinceTimestamp = lastAgentTimestamp[msg.chat_jid] || '';
@@ -335,11 +392,36 @@ async function runAgent(
   const isMain = group.folder === MAIN_GROUP_FOLDER || group.isMain === true;
   const sessionId = sessions[group.folder];
 
+  // Resolve org-mode context (admin, team, or null for personal mode)
+  let orgMountContext: OrgMountContext | undefined;
+  let isAdmin = false;
+  let teamId: string | undefined;
+  let orgTeamIds: string[] | undefined;
+  let teamEmail: string | undefined;
+
+  if (orgConfig) {
+    // Check if this is the admin group
+    isAdmin = isAdminJid(orgConfig, chatJid) || isAdminGroupName(orgConfig, group.name);
+
+    if (isAdmin) {
+      orgMountContext = { isAdmin: true, allTeams: orgConfig.teams };
+      orgTeamIds = orgConfig.teams.map((t) => t.id);
+    } else {
+      // Try to match a team by JID, then by group name
+      const team = findTeamByJid(orgConfig, chatJid) ?? findTeamByGroupName(orgConfig, group.name);
+      if (team) {
+        orgMountContext = { teamConfig: team };
+        teamId = team.id;
+        teamEmail = team.email;
+      }
+    }
+  }
+
   // Update tasks snapshot for container to read (filtered by group)
   const tasks = getAllTasks();
   writeTasksSnapshot(
     group.folder,
-    isMain,
+    isMain || isAdmin,
     tasks.map((t) => ({
       id: t.id,
       groupFolder: t.group_folder,
@@ -351,14 +433,28 @@ async function runAgent(
     })),
   );
 
-  // Update available groups snapshot (main group only can see all groups)
+  // Update available groups snapshot (main/admin group can see all groups)
   const availableGroups = getAvailableGroups();
   writeGroupsSnapshot(
     group.folder,
-    isMain,
+    isMain || isAdmin,
     availableGroups,
     new Set(Object.keys(registeredGroups)),
   );
+
+  // Write org context for the agent to read (org mode only)
+  if (orgConfig && (isAdmin || teamId)) {
+    writeOrgContext(group.folder, {
+      orgName: orgConfig.organization.name,
+      isAdmin,
+      teamId,
+      teamName: orgMountContext?.teamConfig?.name,
+      teamEmail,
+      allTeams: isAdmin
+        ? orgConfig.teams.map((t) => ({ id: t.id, name: t.name, email: t.email }))
+        : undefined,
+    });
+  }
 
   try {
     const output = await runContainerAgent(group, {
@@ -366,8 +462,12 @@ async function runAgent(
       sessionId,
       groupFolder: group.folder,
       chatJid,
-      isMain,
-    });
+      isMain: isMain || isAdmin,
+      isAdmin,
+      teamId,
+      orgTeamIds,
+      teamEmail,
+    }, orgMountContext);
 
     if (output.newSessionId) {
       sessions[group.folder] = output.newSessionId;
@@ -548,6 +648,8 @@ async function processTaskIpc(
     folder?: string;
     trigger?: string;
     containerConfig?: RegisteredGroup['containerConfig'];
+    // For request_google_oauth
+    service?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -744,13 +846,30 @@ async function processTaskIpc(
         break;
       }
       if (data.jid && data.name && data.folder && data.trigger) {
+        // Auto-detect DM registrations by JID suffix
+        const isDmReg = data.jid.endsWith('@s.whatsapp.net') || data.jid.endsWith('@lid');
+
         registerGroup(data.jid, {
           name: data.name,
           folder: data.folder,
           trigger: data.trigger,
           added_at: new Date().toISOString(),
           containerConfig: data.containerConfig,
+          isDm: isDmReg || undefined,
+          alwaysProcess: isDmReg || undefined,
         });
+
+        // If this was a pending DM request, clean it up and notify user
+        if (isDmReg) {
+          const removed = removePendingRequest(data.jid);
+          if (removed) {
+            logger.info({ jid: data.jid, phone: removed.phone }, 'Approved pending DM request');
+          }
+          await sendMessage(
+            data.jid,
+            `${ASSISTANT_NAME}: Your registration has been approved! I'm now available to help you. Just send me a message anytime.`,
+          );
+        }
       } else {
         logger.warn(
           { data },
@@ -758,6 +877,82 @@ async function processTaskIpc(
         );
       }
       break;
+
+    case 'deny_dm':
+      // Only main group can deny DM requests
+      if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized deny_dm attempt blocked');
+        break;
+      }
+      if (data.jid) {
+        const denied = removePendingRequest(data.jid);
+        if (denied) {
+          logger.info({ jid: data.jid, phone: denied.phone }, 'Denied DM request');
+        } else {
+          logger.warn({ jid: data.jid }, 'No pending DM request found to deny');
+        }
+      }
+      break;
+
+    case 'request_google_oauth': {
+      if (!data.chatJid || !data.groupFolder) {
+        logger.warn({ data }, 'Invalid request_google_oauth: missing chatJid or groupFolder');
+        break;
+      }
+
+      // Verify this is a DM user with credential directories
+      const oauthTarget = Object.entries(registeredGroups).find(
+        ([, g]) => g.folder === data.groupFolder,
+      );
+      if (!oauthTarget || !oauthTarget[1].isDm) {
+        logger.warn(
+          { groupFolder: data.groupFolder },
+          'request_google_oauth rejected: not a DM user',
+        );
+        if (data.chatJid) {
+          await sendMessage(
+            data.chatJid,
+            `${ASSISTANT_NAME}: Google account setup is only available for DM users.`,
+          );
+        }
+        break;
+      }
+
+      // Authorization: source group must match target (or be main)
+      if (sourceGroup !== data.groupFolder && !isMain) {
+        logger.warn(
+          { sourceGroup, targetGroup: data.groupFolder },
+          'Unauthorized request_google_oauth attempt blocked',
+        );
+        break;
+      }
+
+      try {
+        const service = (data.service || 'all') as OAuthService;
+        const { authUrl } = createOAuthSession(
+          data.chatJid,
+          data.groupFolder,
+          service,
+        );
+
+        await sendMessage(
+          data.chatJid,
+          `${ASSISTANT_NAME}: To connect your Google account, click this link:\n\n${authUrl}\n\nThis link expires in 10 minutes.`,
+        );
+
+        logger.info(
+          { groupFolder: data.groupFolder, service, chatJid: data.chatJid },
+          'OAuth URL sent to user',
+        );
+      } catch (err) {
+        logger.error({ err, groupFolder: data.groupFolder }, 'Failed to create OAuth session');
+        await sendMessage(
+          data.chatJid,
+          `${ASSISTANT_NAME}: Failed to start Google setup. Please try again later.`,
+        );
+      }
+      break;
+    }
 
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
@@ -837,6 +1032,7 @@ async function connectWhatsApp(): Promise<void> {
         getSessions: () => sessions,
       });
       startIpcWatcher();
+      startOAuthServer(sendMessage);
       startMessageLoop();
 
       // Periodic cleanup of old incoming media files
@@ -898,8 +1094,10 @@ async function connectWhatsApp(): Promise<void> {
       // Always store chat metadata for group discovery
       storeChatMetadata(chatJid, timestamp);
 
-      // Store messages for registered groups and all group chats (for auto-registration)
-      if (registeredGroups[chatJid] || chatJid.endsWith('@g.us')) {
+      // Store messages for registered groups, all group chats (for auto-registration),
+      // pending DM requests, and all DMs (so unregistered users can trigger registration)
+      const isDmJid = chatJid.endsWith('@s.whatsapp.net') || chatJid.endsWith('@lid');
+      if (registeredGroups[chatJid] || chatJid.endsWith('@g.us') || isPending(chatJid) || isDmJid) {
         // For registered groups, download media if present
         let mediaResult: { filePath: string; mediaType: string; caption: string } | null = null;
         if (registeredGroups[chatJid]) {
@@ -931,10 +1129,17 @@ async function startMessageLoop(): Promise<void> {
   while (true) {
     try {
       // Include registered groups + all known group chats (for auto-registration)
+      // + pending DM requests (so their trigger messages get picked up)
       const registeredJids = new Set(Object.keys(registeredGroups));
       const allChats = getAllChats();
       for (const chat of allChats) {
-        if (chat.jid.endsWith('@g.us')) registeredJids.add(chat.jid);
+        // Include group chats (for auto-registration) and DM chats (for pending registration)
+        if (chat.jid.endsWith('@g.us') || chat.jid.endsWith('@s.whatsapp.net') || chat.jid.endsWith('@lid')) {
+          registeredJids.add(chat.jid);
+        }
+      }
+      for (const req of loadPendingRequests()) {
+        registeredJids.add(req.jid);
       }
       const jids = [...registeredJids];
       const { messages } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
@@ -1008,6 +1213,21 @@ async function main(): Promise<void> {
   initDatabase();
   logger.info('Database initialized');
   loadState();
+
+  // Load org config (null = personal mode, no behavior change)
+  try {
+    orgConfig = loadOrgConfig(path.resolve(ORG_CONFIG_PATH));
+    if (orgConfig) {
+      logger.info(
+        { org: orgConfig.organization.name, teams: orgConfig.teams.length },
+        'Org mode active',
+      );
+    }
+  } catch (err) {
+    logger.error({ err, configPath: ORG_CONFIG_PATH }, 'Failed to load org config');
+    process.exit(1);
+  }
+
   await connectWhatsApp();
 }
 
