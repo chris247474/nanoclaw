@@ -16,7 +16,7 @@ import {
 } from './config.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import { RegisteredGroup, TeamConfig } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -39,6 +39,79 @@ export interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  // Org mode fields
+  isAdmin?: boolean;
+  teamId?: string;
+  orgTeamIds?: string[];
+  teamEmail?: string;
+}
+
+export interface OrgMountContext {
+  teamConfig?: TeamConfig;
+  isAdmin?: boolean;
+  allTeams?: TeamConfig[];
+}
+
+/**
+ * Build volume mounts for org-mode credentials.
+ * - Team container: mount team's own credentials at standard paths
+ * - Admin container: mount ALL teams' credentials at namespaced paths
+ */
+export function getOrgVolumeMounts(ctx: OrgMountContext): VolumeMount[] {
+  const mounts: VolumeMount[] = [];
+
+  if (ctx.isAdmin && ctx.allTeams) {
+    // Admin: mount each team's credentials at namespaced paths
+    for (const team of ctx.allTeams) {
+      if (team.credentials.gmail) {
+        mounts.push({
+          hostPath: team.credentials.gmail,
+          containerPath: `/home/node/.gmail-mcp-${team.id}`,
+          readonly: false,
+        });
+      }
+      if (team.credentials.calendar) {
+        mounts.push({
+          hostPath: team.credentials.calendar,
+          containerPath: `/home/node/.config/google-calendar-mcp-${team.id}`,
+          readonly: false,
+        });
+      }
+      if (team.credentials.drive) {
+        mounts.push({
+          hostPath: team.credentials.drive,
+          containerPath: `/home/node/.config/google-drive-mcp-${team.id}`,
+          readonly: false,
+        });
+      }
+    }
+  } else if (ctx.teamConfig) {
+    // Team: mount own credentials at standard paths
+    const creds = ctx.teamConfig.credentials;
+    if (creds.gmail) {
+      mounts.push({
+        hostPath: creds.gmail,
+        containerPath: '/home/node/.gmail-mcp',
+        readonly: false,
+      });
+    }
+    if (creds.calendar) {
+      mounts.push({
+        hostPath: creds.calendar,
+        containerPath: '/home/node/.config/google-calendar-mcp',
+        readonly: false,
+      });
+    }
+    if (creds.drive) {
+      mounts.push({
+        hostPath: creds.drive,
+        containerPath: '/home/node/.config/google-drive-mcp',
+        readonly: false,
+      });
+    }
+  }
+
+  return mounts;
 }
 
 export interface ContainerOutput {
@@ -57,6 +130,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  orgContext?: OrgMountContext,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const homeDir = getHomeDir();
@@ -96,34 +170,67 @@ function buildVolumeMounts(
     }
   }
 
-  // Gmail credentials directory (main only - tokens needed for Gmail MCP)
-  if (isMain) {
+  // Google credentials mounting:
+  // - Org mode: use per-team or admin multi-mount from org config
+  // - DM users: mount per-user credentials from their group folder
+  // - Personal mode main: home-dir credentials (backward compatible)
+  if (orgContext && (orgContext.teamConfig || orgContext.isAdmin)) {
+    mounts.push(...getOrgVolumeMounts(orgContext));
+  } else if (group.isDm) {
+    // DM users: credentials stored in their own folder
+    const credsBase = path.join(GROUPS_DIR, group.folder, '.credentials');
+
+    const gmailCredsDir = path.join(credsBase, 'gmail-mcp');
+    if (fs.existsSync(gmailCredsDir)) {
+      mounts.push({
+        hostPath: gmailCredsDir,
+        containerPath: '/home/node/.gmail-mcp',
+        readonly: false,
+      });
+    }
+
+    const calendarCredsDir = path.join(credsBase, 'google-calendar-mcp');
+    if (fs.existsSync(calendarCredsDir)) {
+      mounts.push({
+        hostPath: calendarCredsDir,
+        containerPath: '/home/node/.config/google-calendar-mcp',
+        readonly: false,
+      });
+    }
+
+    const driveCredsDir = path.join(credsBase, 'google-drive-mcp');
+    if (fs.existsSync(driveCredsDir)) {
+      mounts.push({
+        hostPath: driveCredsDir,
+        containerPath: '/home/node/.config/google-drive-mcp',
+        readonly: false,
+      });
+    }
+  } else if (isMain) {
     const gmailDir = path.join(homeDir, '.gmail-mcp');
     if (fs.existsSync(gmailDir)) {
       mounts.push({
         hostPath: gmailDir,
         containerPath: '/home/node/.gmail-mcp',
-        readonly: false,  // MCP may need to refresh tokens
+        readonly: false,
       });
     }
 
-    // Google Calendar tokens directory
     const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
     if (fs.existsSync(calendarDir)) {
       mounts.push({
         hostPath: calendarDir,
         containerPath: '/home/node/.config/google-calendar-mcp',
-        readonly: false,  // MCP may need to refresh tokens
+        readonly: false,
       });
     }
 
-    // Google Drive credentials directory
     const gdriveDir = path.join(homeDir, '.config', 'google-drive-mcp');
     if (fs.existsSync(gdriveDir)) {
       mounts.push({
         hostPath: gdriveDir,
         containerPath: '/home/node/.config/google-drive-mcp',
-        readonly: false,  // MCP may need to refresh tokens
+        readonly: false,
       });
     }
   }
@@ -178,10 +285,10 @@ function buildVolumeMounts(
       return allowedVars.some((v) => trimmed.startsWith(`${v}=`));
     });
 
-    // Non-admin groups: override model to Sonnet 4.5 and remove fallback
+    // Non-admin groups: override model to Haiku 4.5 (with extended thinking) and remove fallback
     // (fallback can't be the same as the main model — SDK rejects it)
     if (!isMain) {
-      const nonAdminModel = process.env.CLAUDE_FALLBACK_MODEL || 'claude-sonnet-4-5-20250929';
+      const nonAdminModel = process.env.CLAUDE_FALLBACK_MODEL || 'claude-haiku-4-5-20251001';
       const overriddenLines = filteredLines
         .filter((line) => !line.trim().startsWith('CLAUDE_MODEL=') && !line.trim().startsWith('CLAUDE_FALLBACK_MODEL='))
         .concat(`CLAUDE_MODEL=${nonAdminModel}`);
@@ -216,7 +323,7 @@ function buildVolumeMounts(
 }
 
 function buildContainerArgs(mounts: VolumeMount[]): string[] {
-  const args: string[] = ['run', '-i', '--rm'];
+  const args: string[] = ['run', '-i', '--rm', '-m', '4G'];
 
   // Apple Container: --mount for readonly, -v for read-write
   for (const mount of mounts) {
@@ -238,13 +345,14 @@ function buildContainerArgs(mounts: VolumeMount[]): string[] {
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
+  orgContext?: OrgMountContext,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
   const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, orgContext);
   const containerArgs = buildContainerArgs(mounts);
 
   logger.debug(
@@ -501,6 +609,58 @@ export function writeTasksSnapshot(
 
   const tasksFile = path.join(groupIpcDir, 'current_tasks.json');
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
+}
+
+/**
+ * Write org context JSON for the container agent to read.
+ * Admin sees all teams and capabilities; team sees only its own info.
+ */
+export function writeOrgContext(
+  groupFolder: string,
+  orgContext: {
+    orgName: string;
+    isAdmin: boolean;
+    teamId?: string;
+    teamName?: string;
+    teamEmail?: string;
+    allTeams?: Array<{ id: string; name: string; email?: string }>;
+  },
+): void {
+  const groupIpcDir = path.join(DATA_DIR, 'ipc', groupFolder);
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+
+  let context: Record<string, unknown>;
+
+  if (orgContext.isAdmin) {
+    context = {
+      organization: orgContext.orgName,
+      role: 'admin',
+      teams: orgContext.allTeams || [],
+      capabilities: [
+        'Read/send email as any team (use mcp__gmail-{teamId}__* tools)',
+        'Search Drive across all teams (use mcp__gdrive-{teamId}__* tools)',
+        'Manage calendars for all teams (use mcp__google-calendar-{teamId}__* tools)',
+      ],
+    };
+  } else {
+    context = {
+      organization: orgContext.orgName,
+      role: 'team',
+      team: {
+        id: orgContext.teamId,
+        name: orgContext.teamName,
+        email: orgContext.teamEmail,
+      },
+      capabilities: [
+        `Read/send email for ${orgContext.teamEmail || 'this team'} (use mcp__gmail__* tools)`,
+        'Access team Drive folders (use mcp__gdrive__* tools)',
+        'Manage team calendar (use mcp__google-calendar__* tools)',
+      ],
+    };
+  }
+
+  const contextFile = path.join(groupIpcDir, 'org_context.json');
+  fs.writeFileSync(contextFile, JSON.stringify(context, null, 2));
 }
 
 export interface AvailableGroup {

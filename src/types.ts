@@ -39,8 +39,18 @@ export interface RegisteredGroup {
   trigger: string;
   added_at: string;
   isMain?: boolean;
+  alwaysProcess?: boolean; // Process every message without trigger (e.g., DM users)
+  isDm?: boolean; // DM registration — per-user credential mounts, no admin privileges
   lidJid?: string; // LID JID for DM contacts (e.g., "223952496496782@lid")
   containerConfig?: ContainerConfig;
+}
+
+export interface PendingDmRequest {
+  jid: string; // Phone JID (e.g., "639524538012@s.whatsapp.net")
+  senderName?: string; // Push name from WhatsApp
+  requestedAt: string; // ISO timestamp
+  triggerMessage: string; // The message that triggered the request
+  phone: string; // Phone number part of JID (for folder naming)
 }
 
 export interface Session {
@@ -91,4 +101,35 @@ export interface TaskRunLog {
   status: 'success' | 'error';
   result: string | null;
   error: string | null;
+}
+
+// --- Multi-team / Org mode types ---
+
+export interface OrgConfig {
+  organization: { id: string; name: string };
+  admin: {
+    whatsapp_jid?: string;
+    whatsapp_group_name?: string;
+    model?: string;
+  };
+  teams: TeamConfig[];
+}
+
+export interface TeamConfig {
+  id: string;
+  name: string;
+  whatsapp_jid?: string;
+  whatsapp_group_name?: string;
+  email?: string;
+  credentials: {
+    gmail?: string;
+    calendar?: string;
+    drive?: string;
+  };
+  drive_folders?: Array<{
+    id: string;
+    name: string;
+    access: 'read-write' | 'read-only';
+  }>;
+  model?: string;
 }

@@ -336,13 +336,14 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
 
       tool(
         'register_group',
-        `Register a new WhatsApp group so the agent can respond to messages there. Main group only.
+        `Register a new WhatsApp group or approve a pending DM request. Main group only.
 
-Use available_groups.json to find the JID for a group. The folder name should be lowercase with hyphens (e.g., "family-chat").`,
+For groups: use available_groups.json to find the JID. Folder name should be lowercase with hyphens (e.g., "family-chat").
+For DMs: use pending_dm_requests.json to find the JID. Folder name should be "dm-{phone}" (e.g., "dm-639524538012"). DM registrations automatically get always-process and per-user credential isolation.`,
         {
-          jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us")'),
-          name: z.string().describe('Display name for the group'),
-          folder: z.string().describe('Folder name for group files (lowercase, hyphens, e.g., "family-chat")'),
+          jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us" for groups, "639524538012@s.whatsapp.net" for DMs)'),
+          name: z.string().describe('Display name for the group/user'),
+          folder: z.string().describe('Folder name (e.g., "family-chat" for groups, "dm-639524538012" for DMs)'),
           trigger: z.string().describe('Trigger word (e.g., "@Andy")')
         },
         async (args) => {
@@ -364,12 +365,116 @@ Use available_groups.json to find the JID for a group. The folder name should be
 
           writeIpcFile(TASKS_DIR, data);
 
+          const isDm = args.jid.endsWith('@s.whatsapp.net') || args.jid.endsWith('@lid');
           return {
             content: [{
               type: 'text',
-              text: `Group "${args.name}" registered. It will start receiving messages immediately.`
+              text: isDm
+                ? `DM registration approved for "${args.name}". They will be notified and can start chatting.`
+                : `Group "${args.name}" registered. It will start receiving messages immediately.`
             }]
           };
+        }
+      ),
+
+      tool(
+        'list_pending_dm_requests',
+        'List pending DM registration requests awaiting approval. Main group only.',
+        {},
+        async () => {
+          if (!isMain) {
+            return {
+              content: [{ type: 'text', text: 'Only the main group can view pending requests.' }],
+              isError: true
+            };
+          }
+
+          const pendingFile = path.join(IPC_DIR, 'pending_dm_requests.json');
+
+          try {
+            if (!fs.existsSync(pendingFile)) {
+              return { content: [{ type: 'text', text: 'No pending DM requests.' }] };
+            }
+
+            const pending = JSON.parse(fs.readFileSync(pendingFile, 'utf-8'));
+
+            if (pending.length === 0) {
+              return { content: [{ type: 'text', text: 'No pending DM requests.' }] };
+            }
+
+            const formatted = pending.map((p: { senderName?: string; phone: string; jid: string; requestedAt: string; triggerMessage: string }) =>
+              `- ${p.senderName || p.phone} (${p.phone})\n  JID: ${p.jid}\n  Requested: ${p.requestedAt}\n  Message: "${p.triggerMessage}"`
+            ).join('\n\n');
+
+            return { content: [{ type: 'text', text: `Pending DM requests:\n\n${formatted}` }] };
+          } catch (err) {
+            return {
+              content: [{ type: 'text', text: `Error reading pending requests: ${err instanceof Error ? err.message : String(err)}` }],
+              isError: true
+            };
+          }
+        }
+      ),
+
+      tool(
+        'request_google_oauth',
+        `Request Google account OAuth setup for the current DM user.
+Use this when a user wants to connect their Google account (Gmail, Calendar, Drive).
+This sends them an authorization URL to click. After they authorize, their Google tools become available automatically.
+
+Service options:
+- "all" (recommended): Connect Gmail, Calendar, and Drive in one authorization
+- "gmail": Connect only Gmail
+- "calendar": Connect only Google Calendar
+- "drive": Connect only Google Drive`,
+        {
+          service: z.enum(['all', 'gmail', 'calendar', 'drive'])
+            .default('all')
+            .describe('Which Google service(s) to connect'),
+        },
+        async (args) => {
+          const data = {
+            type: 'request_google_oauth',
+            service: args.service,
+            chatJid,
+            groupFolder,
+            timestamp: new Date().toISOString(),
+          };
+
+          const filename = writeIpcFile(TASKS_DIR, data);
+
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `Google OAuth setup initiated for ${args.service}. An authorization link will be sent to the user shortly. (${filename})`,
+            }],
+          };
+        }
+      ),
+
+      tool(
+        'deny_dm',
+        'Deny a pending DM registration request. Main group only.',
+        {
+          jid: z.string().describe('The WhatsApp JID of the pending request to deny')
+        },
+        async (args) => {
+          if (!isMain) {
+            return {
+              content: [{ type: 'text', text: 'Only the main group can deny DM requests.' }],
+              isError: true
+            };
+          }
+
+          const data = {
+            type: 'deny_dm',
+            jid: args.jid,
+            timestamp: new Date().toISOString()
+          };
+
+          writeIpcFile(TASKS_DIR, data);
+
+          return { content: [{ type: 'text', text: `DM request for ${args.jid} denied.` }] };
         }
       )
     ]

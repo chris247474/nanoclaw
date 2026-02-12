@@ -1,0 +1,276 @@
+================================================================================
+  VERCH: Enterprise Agent Platform
+  Pricing Strategy & Financial Analysis
+  Generated: February 12, 2026
+================================================================================
+
+EXECUTIVE SUMMARY
+-----------------
+
+Metric                              Value
+Target Market                       Mid-market businesses ($1M-$50M annual revenue)
+Value Proposition                   On-premise AI agents with full data privacy
+Hardware Setup                      2x Mac Studios + 1TB VRAM (~$20K) hosting Kimi K2.5
+Pricing Model                       3-tier: Demo (Free) → Pro ($3K-8K/mo) → Enterprise
+Path to $1M+ ARR                    38-45 customers (mixed tier at 70-75% adoption)
+Gross Margin Target                 70-75% (after all costs)
+Time to Profitability               3-4 months at target customer count
+
+
+================================================================================
+TIERED PRICING STRUCTURE
+================================================================================
+
+TIER 1: DEMO / PROOF-OF-CONCEPT
+-------------------------------
+
+Component                           Details
+Monthly Cost                        $2,000 (after 30-day free trial)
+Infrastructure                     Shared hosted Kimi K2.5 (your infrastructure)
+Setup Cost                          Included (no CapEx from customer)
+User Limit                          Up to 3 team members
+Functions                           1 department (accounting, support, or logistics)
+Integrations                        Google Drive, Gmail, Calendar
+Support Level                       Email, <24hr response
+Typical Duration                    2-4 months (conversion or churn funnel)
+Conversion Goal                     40-50% to Pro tier
+
+
+TIER 2: PRO - ON-PREMISE HOSTED
+--------------------------------
+
+                                    Pro Base        Pro Plus       Pro Enterprise
+Setup (CapEx)                       $20,000         $20,000        $20,000
+Monthly Subscription                $3,000          $5,000         $8,000
+Infrastructure                     Customer-owned (2x Mac Studios + 1TB VRAM)
+LLM Model                          Kimi K2.5 (on their servers)
+User Limit                         5 users         15 users       Unlimited
+Functions                         1 function      2 functions    Unlimited
+Integration Level                 Basic           Advanced       Custom APIs + dev
+Support                           Email + qtr     Slack + 2x/mo  24/5 managed
+Custom Development                Patches incl    10 hrs/month   Unlimited
+Setup Recovery Period              6.7 months      4 months       2.5 months
+
+
+TIER 3: SUPPORT ADD-ONS (Monthly Overlays)
+-------------------------------------------
+
+Support Level                       Cost/Month      Response SLA   What's Included
+Level 1: Essential                  $2,000          9-5 EST        Slack, monthly calls
+Level 2: Advanced                   $5,000          <2 hours       2x calls, 10 hrs dev
+Level 3: Full Managed               $15,000         Priority       Dedicated engineer
+
+
+================================================================================
+UNIT ECONOMICS & PROFITABILITY ANALYSIS
+================================================================================
+
+DEMO TIER ECONOMICS
+-------------------
+
+Metric                              Value
+Monthly Revenue per Customer        $2,000
+Hosting Cost (allocated)            $50
+Gross Margin                        97.5%
+Customer Lifetime                   2-4 months
+Lifetime Value (pre-conversion)     $4,000 - $8,000
+CAC Payback Period                  <1 month
+
+
+PRO TIER ECONOMICS
+------------------
+
+                                    Pro Base        Pro Plus       Pro Enterprise
+Monthly Revenue                     $3,000          $5,000         $8,000
+Setup Cost (CapEx)                  $20,000         $20,000        $20,000
+Monthly COGS (est)                  $900            $1,500         $2,000
+Gross Margin %                      70%             70%            75%
+Setup Recovery Period               6.7 months      4 months       2.5 months
+3-Year LTV (85% retention)          $153,000        $255,000       $408,000
+LTV:CAC Ratio                       7.65:1          12.75:1        20.4:1
+
+
+================================================================================
+ANNUAL OPERATING EXPENSE MODEL
+================================================================================
+
+Cost Category                       Monthly         Annual          Notes
+Personnel Costs
+  Support Engineers (2 FTE)         $16,667         $200,000        Core technical team
+  Customer Success Manager (1)      $6,667          $80,000         Onboarding + retention
+  Sales/BD (1 FTE)                  $6,667          $80,000         Enterprise sales
+Infrastructure & Licensing
+  Demo tier shared hosting          $3,000          $36,000         K2.5 + compute
+  K2.5 licensing                    $2,000          $24,000         Model licensing
+  Cloud services                    $1,500          $18,000         AWS, storage, CDN
+Marketing & Growth
+  Paid advertising                  $2,000          $24,000         LinkedIn, Google, events
+  Content marketing                 $1,000          $12,000         Blog, case studies
+Operating Expenses
+  Legal & Compliance                $1,000          $12,000         SOC2, contracts
+  Tools & Operations                $2,000          $24,000         Software subscriptions
+  Miscellaneous                     $1,000          $12,000         Travel, contingency
+---
+TOTAL MONTHLY OpEx                  $41,833         $500,000        At steady state (5 FTE)
+
+
+================================================================================
+REVENUE PROJECTIONS TO $1M+ ANNUAL GROSS
+================================================================================
+
+CUSTOMER MIX SCENARIOS
+----------------------
+
+Metric                              Conservative    Moderate        Aggressive
+Demo Customers                      8               10              12
+Pro Base Customers                  12              15              18
+Pro Plus Customers                  8               12              15
+Pro Enterprise Customers            3               4               5
+Support Add-on Adoption             25%             35%             50%
+---
+TOTAL CUSTOMERS                     31              41              50
+
+
+MONTHLY REVENUE (Moderate Scenario: 41 Customers)
+-------------------------------------------------
+
+Revenue Stream                      Customers       Unit Price      Monthly Revenue
+Demo Tier                           10              $2,000          $20,000
+Pro Base                            15              $3,000          $45,000
+Pro Plus                            12              $5,000          $60,000
+Pro Enterprise                      4               $8,000          $32,000
+Support Add-ons (35% adoption)      14              $6,400 avg      $89,600
+Setup Fees (amortized 12mo)         19              $1,053          $20,000
+---
+TOTAL MONTHLY REVENUE               -               -               $266,600 ($3.2M annually)
+
+
+PATH TO $1M+ ANNUAL REVENUE
+---------------------------
+
+Metric                              Conservative    Moderate        Aggressive
+Monthly Revenue                     $155,000        $267,000        $335,000
+Annual Gross Revenue                $1.86M          $3.2M           $4.02M
+Gross Margin $ (70%)                $1.3M           $2.24M          $2.81M
+Customers to Break-Even             16-20           16-20           16-20
+Monthly Profit                      $113,000        $225,000        $293,000
+Annual Profit                       $1.35M          $2.7M           $3.5M
+
+
+KEY INSIGHT
+-----------
+
+🎯 You need only 38-45 paying customers to hit $1M+ gross revenue.
+
+Given 40-50% Demo→Pro conversion and 35% support add-on adoption, this is
+achievable in 8-12 months with focused GTM on Jerome's logistics network,
+accounting firms, and customer service teams in mid-market.
+
+
+================================================================================
+RECOMMENDED GO-TO-MARKET ROADMAP
+================================================================================
+
+PHASE 1: PROOF OF CONCEPT (Months 1-3)
+---------------------------------------
+Goal:           Lock in 3 reference customers
+Target:         Jerome (logistics), customs broker, Agam
+Pricing:        20-30% discount for case study rights
+Actions:        Deploy custom integrations, document ROI, testimonials
+Success Metric: 3 customers live, $500K+ projected annual savings
+
+
+PHASE 2: REFINE & BUILD SALES (Months 3-6)
+-------------------------------------------
+Goal:           10-15 customers, repeatable sales motion
+Vertical:       Logistics (warm intros from Jerome)
+Team:           Hire 1 sales person ($80K)
+Actions:        Industry playbooks, case studies, warm outreach
+Targets:        12-15 new customers
+Revenue:        ~$60K-80K MRR
+
+
+PHASE 3: SCALE & EXPAND (Months 6-12)
+--------------------------------------
+Goal:           30-40 customers total, $800K-1.2M ARR
+Expansion:      Add Accounting (Q3), Customer Service (Q4)
+Team:           Hire support engineer ($100K), CS manager ($80K)
+Revenue:        ~$200K-250K MRR
+Profitability:  Cash flow positive by Month 10-12
+
+
+PHASE 4: ESTABLISH MARKET (Months 12-18)
+----------------------------------------
+Goal:           45-55 customers, $1.5M+ ARR
+Maturity:       All 3 verticals with dedicated plays
+Team:           Total 6-8 people
+Revenue:        ~$300K+ MRR
+Exit/Funding:   Series A ready
+
+
+================================================================================
+COMPETITIVE POSITIONING
+================================================================================
+
+Competitor Type                     Their Weakness                  Verch Advantage
+No-code (Zapier, Make)              Per-action fees, limited        Unlimited, owned data
+Pure SaaS (Notion, HubSpot)         Privacy concerns                On-prem option
+Custom dev teams                    6 months, $200K+ cost           6 weeks, $20K
+Other agentic AI (Anduril)          Cloud-only, expensive           On-prem, mid-market
+
+
+================================================================================
+FINANCIAL SUMMARY & KEY METRICS
+================================================================================
+
+Key Metric                          Value
+Target ARR (at 41 customers)        $3.2M
+Time to $1M ARR                     6-8 months
+Customers needed for $1M            38-45 (mixed tier)
+Average Revenue Per Customer        $6,500/month
+Gross Margin %                      70-75%
+CAC Payback Period                  2-4 months average
+LTV:CAC Ratio                       6-8:1 (healthy)
+Time to Cash-Flow Positive          3-4 months at target
+Break-even Customers                16-20 (any tier mix)
+Monthly OpEx (steady state)         $41,833 (5 FTE)
+Monthly Profit (at 41 customers)    $225,000
+Annual Profit (at 41 customers)     $2.7M
+
+
+================================================================================
+IMMEDIATE NEXT STEPS
+================================================================================
+
+✅ 1. CONFIRM CUSTOMER MIX TARGETS
+   What ratio of Pro Base / Pro Plus / Enterprise?
+   Recommend: 40% Base, 35% Plus, 15% Enterprise
+
+✅ 2. LOCK IN REFERENCE CUSTOMERS (This Month)
+   Deploy with Jerome, customs broker, Agam
+   Offer 20-30% discount for case study rights
+   Document quarterly ROI improvements
+
+✅ 3. BUILD SALES MATERIALS
+   Create vertical-specific case studies (Logistics first)
+   Develop ROI calculator for prospects
+   Write competitive comparison docs
+
+✅ 4. HIRE FOR GROWTH (By Month 4-5)
+   Sales person ($80K) for customer acquisition
+   Support engineer ($100K) for customer success
+
+✅ 5. LAUNCH VERTICAL FOCUS
+   Q1: Logistics (warm intros from Jerome)
+   Q2: Finance/Accounting (mid-market CFOs)
+   Q3: Customer Service (support teams)
+
+✅ 6. TRACK KEY METRICS MONTHLY
+   MRR growth, customer count, churn rate
+   Demo→Pro conversion (target 40-50%)
+   Support add-on adoption (target 35%+)
+   CAC, LTV, payback period
+
+================================================================================
+END OF ANALYSIS
+================================================================================

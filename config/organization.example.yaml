@@ -1,0 +1,40 @@
+# NanoClaw Organization Config
+# Copy to organization.yaml and customize for your org.
+# If this file doesn't exist, NanoClaw runs in personal mode (no change).
+
+organization:
+  id: acme-corp            # Unique org identifier
+  name: Acme Corporation   # Display name
+
+# Admin group — has access to ALL teams' Google resources
+admin:
+  # Identify admin group by JID or name (use one):
+  # whatsapp_jid: "120363001234567890@g.us"
+  whatsapp_group_name: "Acme Management"
+  model: claude-opus-4-6   # Optional: override model for admin
+
+teams:
+  - id: customer-service
+    name: Customer Service
+    whatsapp_group_name: "Acme CS Team"
+    email: support@acme.com
+    credentials:
+      gmail: /etc/nanoclaw/acme/cs/gmail-mcp
+      calendar: /etc/nanoclaw/acme/cs/calendar-mcp
+      drive: /etc/nanoclaw/acme/cs/drive-mcp
+    drive_folders:
+      - id: "1a2b3c4d"
+        name: Customer Support
+        access: read-write
+      - id: "3c4d5e6f"
+        name: Company Policies
+        access: read-only
+
+  - id: operations
+    name: Operations
+    whatsapp_group_name: "Acme Ops Team"
+    email: ops@acme.com
+    credentials:
+      gmail: /etc/nanoclaw/acme/ops/gmail-mcp
+      calendar: /etc/nanoclaw/acme/ops/calendar-mcp
+      drive: /etc/nanoclaw/acme/ops/drive-mcp

@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VERCH: Pricing Strategy & Financial Analysis</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: white;
+            padding: 40px;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            font-size: 28px;
+            margin-bottom: 10px;
+            color: #1a1a1a;
+        }
+        h2 {
+            text-align: center;
+            font-size: 18px;
+            margin-bottom: 5px;
+            color: #2563eb;
+        }
+        .header-info {
+            text-align: center;
+            font-size: 12px;
+            margin-bottom: 40px;
+            color: #666;
+        }
+        .section {
+            margin-bottom: 40px;
+            page-break-inside: avoid;
+        }
+        .section-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #2563eb;
+            margin-bottom: 15px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #2563eb;
+        }
+        .subsection-title {
+            font-size: 13px;
+            font-weight: bold;
+            color: #059669;
+            margin-top: 15px;
+            margin-bottom: 10px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+            font-size: 11px;
+        }
+        th {
+            background-color: #2563eb;
+            color: white;
+            padding: 10px;
+            text-align: left;
+            font-weight: bold;
+        }
+        td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        tr:nth-child(even) {
+            background-color: #f9fafb;
+        }
+        .metric-box {
+            background-color: #eff6ff;
+            border-left: 4px solid #2563eb;
+            padding: 15px;
+            margin: 10px 0;
+            font-size: 12px;
+        }
+        .success-metric {
+            background-color: #dcfce7;
+            border-left: 4px solid #15803d;
+            padding: 10px;
+            margin: 5px 0;
+            font-size: 11px;
+        }
+        .phase {
+            background-color: #eff6ff;
+            padding: 12px;
+            margin: 10px 0;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+        .phase-title {
+            font-weight: bold;
+            color: #1e40af;
+            margin-bottom: 5px;
+        }
+        ul {
+            margin-left: 20px;
+            font-size: 11px;
+            line-height: 1.5;
+        }
+        li {
+            margin: 5px 0;
+        }
+        .key-insight {
+            background-color: #fef3c7;
+            border-left: 4px solid #ea580c;
+            padding: 15px;
+            margin: 15px 0;
+            font-size: 12px;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 50px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            font-size: 10px;
+            color: #666;
+        }
+        @media print {
+            body {
+                padding: 20px;
+            }
+            .section {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>VERCH: Enterprise Agent Platform</h1>
+        <h2>Pricing Strategy & Financial Analysis</h2>
+        <div class="header-info">
+            <p>Generated: February 12, 2026</p>
+        </div>
+
+        <div class="section">
+            <div class="section-title">EXECUTIVE SUMMARY</div>
+            <table>
+                <tr>
+                    <th>Metric</th>
+                    <th>Details</th>
+                </tr>
+                <tr>
+                    <td>Target Market</td>
+                    <td>Mid-market businesses ($1M-$50M annual revenue)</td>
+                </tr>
+                <tr>
+                    <td>Value Proposition</td>
+                    <td>On-premise AI agents with full data privacy & multi-department automation</td>
+                </tr>
+                <tr>
+                    <td>Hardware Setup</td>
+                    <td>2x Mac Studios + 1TB VRAM (~$20K) hosting private Kimi K2.5 LLM</td>
+                </tr>
+                <tr>
+                    <td>Pricing Model</td>
+                    <td>3-tier: Demo (Free→$2K/mo) → Pro ($3K-$8K/mo) → Enterprise + Support</td>
+                </tr>
+                <tr>
+                    <td>Path to $1M+ ARR</td>
+                    <td>38-45 customers (mixed tier with 40-50% Demo→Pro conversion)</td>
+                </tr>
+                <tr>
+                    <td>Gross Margin Target</td>
+                    <td>70-75% (after all infrastructure, support, and licensing costs)</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">TIERED PRICING STRUCTURE</div>
+
+            <div class="subsection-title">TIER 1: DEMO / PROOF-OF-CONCEPT</div>
+            <table>
+                <tr>
+                    <th>Component</th>
+                    <th>Details</th>
+                </tr>
+                <tr>
+                    <td>Monthly Cost</td>
+                    <td>$2,000/month (after 30-day free trial)</td>
+                </tr>
+                <tr>
+                    <td>Infrastructure</td>
+                    <td>Shared hosted Kimi K2.5 instance (your infrastructure)</td>
+                </tr>
+                <tr>
+                    <td>User Limit</td>
+                    <td>Up to 3 team members</td>
+                </tr>
+                <tr>
+                    <td>Functions</td>
+                    <td>1 department (accounting, support, or logistics)</td>
+                </tr>
+                <tr>
+                    <td>Support</td>
+                    <td>Email support, &lt;24hr response</td>
+                </tr>
+                <tr>
+                    <td>Conversion Goal</td>
+                    <td>40-50% to Pro tier</td>
+                </tr>
+            </table>
+
+            <div class="subsection-title">TIER 2: PRO - ON-PREMISE HOSTED</div>
+            <table>
+                <tr>
+                    <th>Component</th>
+                    <th>Pro Base</th>
+                    <th>Pro Plus</th>
+                    <th>Pro Enterprise</th>
+                </tr>
+                <tr>
+                    <td>Setup (CapEx)</td>
+                    <td>$20,000</td>
+                    <td>$20,000</td>
+                    <td>$20,000</td>
+                </tr>
+                <tr>
+                    <td>Monthly Subscription</td>
+                    <td>$3,000</td>
+                    <td>$5,000</td>
+                    <td>$8,000</td>
+                </tr>
+                <tr>
+                    <td>User Limit</td>
+                    <td>5 users</td>
+                    <td>15 users</td>
+                    <td>Unlimited</td>
+                </tr>
+                <tr>
+                    <td>Functions</td>
+                    <td>1</td>
+                    <td>2</td>
+                    <td>Unlimited</td>
+                </tr>
+                <tr>
+                    <td>Support</td>
+                    <td>Email + quarterly</td>
+                    <td>Slack + 2x/month</td>
+                    <td>24/5 managed</td>
+                </tr>
+            </table>
+
+            <div class="subsection-title">TIER 3: SUPPORT ADD-ONS (Monthly)</div>
+            <table>
+                <tr>
+                    <th>Level</th>
+                    <th>Cost/Month</th>
+                    <th>Response SLA</th>
+                    <th>Includes</th>
+                </tr>
+                <tr>
+                    <td>Essential</td>
+                    <td>$2,000</td>
+                    <td>9-5 EST</td>
+                    <td>Slack channel, monthly optimization</td>
+                </tr>
+                <tr>
+                    <td>Advanced</td>
+                    <td>$5,000</td>
+                    <td>&lt;2 hours</td>
+                    <td>2x strategy calls, 10 hrs custom dev</td>
+                </tr>
+                <tr>
+                    <td>Full Managed</td>
+                    <td>$15,000</td>
+                    <td>Priority</td>
+                    <td>Dedicated engineer, weekly calls</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">UNIT ECONOMICS</div>
+
+            <div class="subsection-title">Demo Tier</div>
+            <table>
+                <tr>
+                    <th>Metric</th>
+                    <th>Value</th>
+                </tr>
+                <tr>
+                    <td>Monthly Revenue per Customer</td>
+                    <td>$2,000</td>
+                </tr>
+                <tr>
+                    <td>Gross Margin</td>
+                    <td>97.5%</td>
+                </tr>
+                <tr>
+                    <td>CAC Payback Period</td>
+                    <td>&lt;1 month</td>
+                </tr>
+            </table>
+
+            <div class="subsection-title">Pro Tier Economics</div>
+            <table>
+                <tr>
+                    <th>Metric</th>
+                    <th>Pro Base</th>
+                    <th>Pro Plus</th>
+                </tr>
+                <tr>
+                    <td>Monthly Revenue</td>
+                    <td>$3,000</td>
+                    <td>$5,000</td>
+                </tr>
+                <tr>
+                    <td>Gross Margin %</td>
+                    <td>70%</td>
+                    <td>70%</td>
+                </tr>
+                <tr>
+                    <td>3-Year LTV</td>
+                    <td>$153K</td>
+                    <td>$255K</td>
+                </tr>
+                <tr>
+                    <td>LTV:CAC Ratio</td>
+                    <td>7.65:1</td>
+                    <td>12.75:1</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="section">
+            <div class="section-title">REVENUE PROJECTIONS</div>
+
+            <div class="subsection-title">Path to $1M+ Annual Revenue</div>
+            <table>
+                <tr>
+                    <th>Scenario</th>
+                    <th>Conservative</th>
+                    <th>Moderate</th>
+                    <th>Aggressive</th>
+                </tr>
+                <tr>
+                    <td>Total Customers</td>
+                    <td>31</td>
+                    <td>41</td>
+                    <td>50</td>
+                </tr>
+                <tr>
+                    <td>Monthly Revenue</td>
+                    <td>$155K</td>
+                    <td>$267K</td>
+                    <td>$335K</td>
+                </tr>
+                <tr>
+                    <td>Annual Gross Revenue</td>
+                    <td>$1.86M</td>
+                    <td>$3.2M</td>
+                    <td>$4.02M</td>
+                </tr>
+                <tr>
+                    <td>Monthly Profit</td>
+                    <td>$113K</td>
+                    <td>$225K</td>
+                    <td>$293K</td>
+                </tr>
+            </table>
+
+            <div class="key-insight">
+                <strong>KEY INSIGHT:</strong> You need only 38-45 paying customers to hit $1M+ gross revenue.
+                Given 40-50% Demo→Pro conversion and 35% support add-on adoption, this is achievable in 8-12 months
+                with focused GTM on Jerome's logistics network, accounting firms, and customer service teams.
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">GO-TO-MARKET ROADMAP</div>
+
+            <div class="phase">
+                <div class="phase-title">Phase 1: Proof of Concept (Months 1-3)</div>
+                <ul>
+                    <li><strong>Goal:</strong> Lock in 3 reference customers</li>
+                    <li><strong>Target:</strong> Jerome (logistics), customs broker, Agam</li>
+                    <li><strong>Offer:</strong> 20-30% discount for case study rights</li>
+                    <li><strong>Success Metric:</strong> 3 customers live, case studies documented</li>
+                </ul>
+            </div>
+
+            <div class="phase">
+                <div class="phase-title">Phase 2: Refine & Scale (Months 3-6)</div>
+                <ul>
+                    <li><strong>Goal:</strong> Close 10-15 customers</li>
+                    <li><strong>Vertical:</strong> Logistics (warm intros from Jerome)</li>
+                    <li><strong>Hiring:</strong> 1 sales person ($80K)</li>
+                    <li><strong>Revenue Target:</strong> $60K-80K MRR</li>
+                </ul>
+            </div>
+
+            <div class="phase">
+                <div class="phase-title">Phase 3: Expand (Months 6-12)</div>
+                <ul>
+                    <li><strong>Goal:</strong> 30-40 customers, $800K-1.2M ARR</li>
+                    <li><strong>Expansion:</strong> Add Accounting (Q3), Customer Service (Q4)</li>
+                    <li><strong>Hiring:</strong> Support engineer ($100K), CS manager</li>
+                    <li><strong>Revenue Target:</strong> $200K-250K MRR</li>
+                </ul>
+            </div>
+
+            <div class="phase">
+                <div class="phase-title">Phase 4: Market Leadership (Months 12-18)</div>
+                <ul>
+                    <li><strong>Goal:</strong> 45-55 customers, $1.5M+ ARR</li>
+                    <li><strong>Maturity:</strong> All 3 verticals with dedicated plays</li>
+                    <li><strong>Revenue Target:</strong> $300K+ MRR</li>
+                    <li><strong>Next Step:</strong> Series A or acquisition</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">FINANCIAL SUMMARY</div>
+            <table>
+                <tr>
+                    <th>Key Metric</th>
+                    <th>Value</th>
+                </tr>
+                <tr>
+                    <td>Target ARR (41 customers)</td>
+                    <td>$3.2M</td>
+                </tr>
+                <tr>
+                    <td>Customers for $1M ARR</td>
+                    <td>38-45</td>
+                </tr>
+                <tr>
+                    <td>Gross Margin %</td>
+                    <td>70-75%</td>
+                </tr>
+                <tr>
+                    <td>CAC Payback Period</td>
+                    <td>2-4 months</td>
+                </tr>
+                <tr>
+                    <td>LTV:CAC Ratio</td>
+                    <td>6-8:1</td>
+                </tr>
+                <tr>
+                    <td>Break-even Customers</td>
+                    <td>16-20</td>
+                </tr>
+                <tr>
+                    <td>Time to Cash-Flow Positive</td>
+                    <td>3-4 months</td>
+                </tr>
+                <tr>
+                    <td>Monthly Profit (at 41 customers)</td>
+                    <td>$225K</td>
+                </tr>
+            </table>
+        </div>
+
+        <div class="footer">
+            <p>VERCH: Pricing Strategy & Financial Analysis</p>
+            <p>Generated: February 12, 2026</p>
+            <p>Print to PDF or view in browser. Optimize margins and revenue model for mid-market enterprise automation.</p>
+        </div>
+    </div>
+</body>
+</html>

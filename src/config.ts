@@ -48,13 +48,23 @@ export const TIMEZONE =
 
 // Model configuration
 export const CLAUDE_MODEL = process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929';
-export const CLAUDE_FALLBACK_MODEL = process.env.CLAUDE_FALLBACK_MODEL;
+export const CLAUDE_FALLBACK_MODEL = process.env.CLAUDE_FALLBACK_MODEL || 'claude-haiku-4-5-20251001';
 
 // 3rd party model support (OpenAI, etc.)
 export const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 export const OPENAI_MODEL = process.env.OPENAI_MODEL;
 export const OPENAI_BASE_URL = process.env.OPENAI_BASE_URL; // For OpenAI-compatible APIs
 
+// Org config
+export const ORG_CONFIG_PATH = process.env.ORG_CONFIG_PATH || 'config/organization.yaml';
+
 // Media/file handling
 export const MAX_MEDIA_SIZE = 50 * 1024 * 1024; // 50MB
 export const FILE_RETENTION_DAYS = 30;
+
+// OAuth configuration (per-user Google account setup)
+export const OAUTH_PORT = parseInt(process.env.OAUTH_PORT || '3847', 10);
+export const OAUTH_CALLBACK_URL = process.env.OAUTH_CALLBACK_URL || `http://localhost:${OAUTH_PORT}`;
+export const GCP_OAUTH_KEYS_PATH = process.env.GCP_OAUTH_KEYS_PATH ||
+  path.join(HOME_DIR, '.gmail-mcp', 'gcp-oauth.keys.json');
+export const OAUTH_SESSION_TTL_MS = 10 * 60 * 1000; // 10 minutes

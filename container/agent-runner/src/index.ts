@@ -15,6 +15,11 @@ interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  // Org mode fields
+  isAdmin?: boolean;
+  teamId?: string;
+  orgTeamIds?: string[];
+  teamEmail?: string;
 }
 
 interface ContainerOutput {
@@ -225,13 +230,26 @@ async function main(): Promise<void> {
   let result: string | null = null;
   let newSessionId: string | undefined;
 
+  // Read org context if available (written by host before container launch)
+  const orgContextPath = '/workspace/ipc/org_context.json';
+  let orgContextPrompt = '';
+  if (fs.existsSync(orgContextPath)) {
+    try {
+      const orgContext = JSON.parse(fs.readFileSync(orgContextPath, 'utf-8'));
+      orgContextPrompt = `[ORGANIZATION CONTEXT]\n${JSON.stringify(orgContext, null, 2)}\n[/ORGANIZATION CONTEXT]\n\n`;
+      log(`Loaded org context: role=${orgContext.role}, org=${orgContext.organization}`);
+    } catch (err) {
+      log(`Failed to read org context: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   // Add progress update instructions for all tasks
   // IMPORTANT: When send_message is used, the final return value is suppressed to avoid duplicates.
   // So if you send progress updates, your final answer MUST also go through send_message.
   let prompt = `[RESPONSE RULES:
 - For simple questions (quick lookups, short answers, confirmations): just return your answer directly. Do NOT use mcp__nanoclaw__send_message.
 - For tasks taking >30 seconds (research, multi-step operations, file processing): use mcp__nanoclaw__send_message for ALL responses including your final answer. Your return value will be suppressed if any send_message was used.
-- Rule: either use send_message for everything OR don't use it at all. Never mix both.]\n\n${input.prompt}`;
+- Rule: either use send_message for everything OR don't use it at all. Never mix both.]\n\n${orgContextPrompt}${input.prompt}`;
 
   // Add context for scheduled tasks
   if (input.isScheduledTask) {
@@ -281,39 +299,83 @@ async function main(): Promise<void> {
       nanoclaw: ipcMcp
     };
 
-    // Add Gmail MCP if credentials exist (main only)
-    const gmailCredsPath = '/home/node/.gmail-mcp/credentials.json';
-    if (input.isMain && fs.existsSync(gmailCredsPath)) {
-      mcpServers['gmail'] = {
-        command: 'npx',
-        args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp']
-      };
-    }
-
-    // Add Google Calendar MCP if tokens exist (main only)
-    const calendarTokensPath = '/home/node/.config/google-calendar-mcp/tokens.json';
-    if (input.isMain && fs.existsSync(calendarTokensPath)) {
-      mcpServers['google-calendar'] = {
-        command: 'npx',
-        args: ['-y', '@cocal/google-calendar-mcp'],
-        env: {
-          GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
-          GOOGLE_CALENDAR_MCP_TOKEN_PATH: calendarTokensPath
+    // Google MCP loading:
+    // - Admin (org mode): load per-team MCP instances at namespaced paths
+    // - Team/Main (org or personal): load MCP if credentials exist at standard paths
+    //   (host only mounts credentials if the team/main has them configured)
+    if (input.isAdmin && input.orgTeamIds) {
+      // Admin: discover and load per-team MCP instances
+      for (const teamId of input.orgTeamIds) {
+        const teamGmailCreds = `/home/node/.gmail-mcp-${teamId}/credentials.json`;
+        if (fs.existsSync(teamGmailCreds)) {
+          mcpServers[`gmail-${teamId}`] = {
+            command: 'npx',
+            args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+            env: {
+              GMAIL_MCP_CREDENTIALS_DIR: `/home/node/.gmail-mcp-${teamId}`
+            }
+          };
         }
-      };
-    }
 
-    // Add Google Drive MCP if tokens exist (main only)
-    const gdriveTokensPath = '/home/node/.config/google-drive-mcp/tokens.json';
-    if (input.isMain && fs.existsSync(gdriveTokensPath)) {
-      mcpServers['gdrive'] = {
-        command: 'npx',
-        args: ['-y', '@piotr-agier/google-drive-mcp'],
-        env: {
-          GOOGLE_DRIVE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
-          GOOGLE_DRIVE_MCP_TOKEN_PATH: gdriveTokensPath
+        const teamCalendarTokens = `/home/node/.config/google-calendar-mcp-${teamId}/tokens.json`;
+        if (fs.existsSync(teamCalendarTokens)) {
+          const teamOAuthKeys = `/home/node/.gmail-mcp-${teamId}/gcp-oauth.keys.json`;
+          mcpServers[`google-calendar-${teamId}`] = {
+            command: 'npx',
+            args: ['-y', '@cocal/google-calendar-mcp'],
+            env: {
+              GOOGLE_OAUTH_CREDENTIALS: teamOAuthKeys,
+              GOOGLE_CALENDAR_MCP_TOKEN_PATH: teamCalendarTokens
+            }
+          };
         }
-      };
+
+        const teamDriveTokens = `/home/node/.config/google-drive-mcp-${teamId}/tokens.json`;
+        if (fs.existsSync(teamDriveTokens)) {
+          const teamOAuthKeys = `/home/node/.gmail-mcp-${teamId}/gcp-oauth.keys.json`;
+          mcpServers[`gdrive-${teamId}`] = {
+            command: 'npx',
+            args: ['-y', '@piotr-agier/google-drive-mcp'],
+            env: {
+              GOOGLE_DRIVE_OAUTH_CREDENTIALS: teamOAuthKeys,
+              GOOGLE_DRIVE_MCP_TOKEN_PATH: teamDriveTokens
+            }
+          };
+        }
+      }
+    } else {
+      // Team or Main (personal mode): load MCP if credentials exist at standard paths
+      const gmailCredsPath = '/home/node/.gmail-mcp/credentials.json';
+      if (fs.existsSync(gmailCredsPath)) {
+        mcpServers['gmail'] = {
+          command: 'npx',
+          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp']
+        };
+      }
+
+      const calendarTokensPath = '/home/node/.config/google-calendar-mcp/tokens.json';
+      if (fs.existsSync(calendarTokensPath)) {
+        mcpServers['google-calendar'] = {
+          command: 'npx',
+          args: ['-y', '@cocal/google-calendar-mcp'],
+          env: {
+            GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+            GOOGLE_CALENDAR_MCP_TOKEN_PATH: calendarTokensPath
+          }
+        };
+      }
+
+      const gdriveTokensPath = '/home/node/.config/google-drive-mcp/tokens.json';
+      if (fs.existsSync(gdriveTokensPath)) {
+        mcpServers['gdrive'] = {
+          command: 'npx',
+          args: ['-y', '@piotr-agier/google-drive-mcp'],
+          env: {
+            GOOGLE_DRIVE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+            GOOGLE_DRIVE_MCP_TOKEN_PATH: gdriveTokensPath
+          }
+        };
+      }
     }
 
     // Add Figma MCP if token exists (available to all groups)
@@ -336,8 +398,11 @@ async function main(): Promise<void> {
         'WebSearch', 'WebFetch',
         'mcp__nanoclaw__*',
         'mcp__gmail__*',
+        'mcp__gmail-*__*',
         'mcp__google-calendar__*',
+        'mcp__google-calendar-*__*',
         'mcp__gdrive__*',
+        'mcp__gdrive-*__*',
         'mcp__figma__*'
       ],
       permissionMode: 'bypassPermissions' as const,
