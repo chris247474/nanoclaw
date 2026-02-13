@@ -418,9 +418,9 @@ For DMs: use pending_dm_requests.json to find the JID. Folder name should be "dm
 
       tool(
         'request_google_oauth',
-        `Request Google account OAuth setup for the current DM user.
+        `Request Google account OAuth setup for the current chat.
 Use this when a user wants to connect their Google account (Gmail, Calendar, Drive).
-This sends them an authorization URL to click. After they authorize, their Google tools become available automatically.
+This sends an authorization URL to the chat. After they authorize, Google tools become available automatically.
 
 Service options:
 - "all" (recommended): Connect Gmail, Calendar, and Drive in one authorization

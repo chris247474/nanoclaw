@@ -343,10 +343,9 @@ async function processMessage(msg: NewMessage): Promise<void> {
   const content = msg.content.trim();
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER || group.isMain;
 
-  // Fast-path: registered DM users requesting Google OAuth — handle directly without container
-  if (group.isDm &&
-      (/\b(set\s*up|connect|link|auth)\b.*\b(google|gmail|calendar|drive)\b/i.test(content) ||
-       /\b(google|gmail|calendar|drive)\b.*\b(set\s*up|connect|link|auth)\b/i.test(content))) {
+  // Fast-path: Google OAuth setup — handle directly without container agent
+  if (/\b(set\s*up|connect|link|auth)\b.*\b(google|gmail|calendar|drive)\b/i.test(content) ||
+      /\b(google|gmail|calendar|drive)\b.*\b(set\s*up|connect|link|auth)\b/i.test(content)) {
     try {
       const service: OAuthService = /\bgmail\b/i.test(content) ? 'gmail'
         : /\bcalendar\b/i.test(content) ? 'calendar'
@@ -357,7 +356,7 @@ async function processMessage(msg: NewMessage): Promise<void> {
         msg.chat_jid,
         `${ASSISTANT_NAME}: To connect your Google account, click this link:\n\n${authUrl}\n\nThis link expires in 10 minutes.`,
       );
-      logger.info({ jid: msg.chat_jid, folder: group.folder, service }, 'OAuth URL sent to registered DM user (fast-path)');
+      logger.info({ jid: msg.chat_jid, folder: group.folder, service }, 'OAuth URL sent (fast-path)');
     } catch (err) {
       logger.error({ err, jid: msg.chat_jid }, 'Failed to create OAuth session');
       await sendMessage(msg.chat_jid, `${ASSISTANT_NAME}: Failed to start Google setup. Please try again later.`);
@@ -993,21 +992,15 @@ async function processTaskIpc(
         break;
       }
 
-      // Verify this is a DM user with credential directories
+      // Verify the target group is registered
       const oauthTarget = Object.entries(registeredGroups).find(
         ([, g]) => g.folder === data.groupFolder,
       );
-      if (!oauthTarget || !oauthTarget[1].isDm) {
+      if (!oauthTarget) {
         logger.warn(
           { groupFolder: data.groupFolder },
-          'request_google_oauth rejected: not a DM user',
+          'request_google_oauth rejected: group not registered',
         );
-        if (data.chatJid) {
-          await sendMessage(
-            data.chatJid,
-            `${ASSISTANT_NAME}: Google account setup is only available for DM users.`,
-          );
-        }
         break;
       }
 

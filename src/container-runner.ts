@@ -289,9 +289,12 @@ function buildVolumeMounts(
   // - Personal mode main: home-dir credentials (backward compatible)
   if (orgContext && (orgContext.teamConfig || orgContext.isAdmin)) {
     mounts.push(...getOrgVolumeMounts(orgContext));
-  } else if (group.isDm) {
-    // DM users: credentials stored in their own folder
+  } else {
+    // Per-group Google credentials (DMs and group chats alike)
     const credsBase = path.join(GROUPS_DIR, group.folder, '.credentials');
+    let hasGroupGmail = false;
+    let hasGroupCalendar = false;
+    let hasGroupDrive = false;
 
     const gmailCredsDir = path.join(credsBase, 'gmail-mcp');
     if (fs.existsSync(gmailCredsDir)) {
@@ -300,6 +303,7 @@ function buildVolumeMounts(
         containerPath: '/home/node/.gmail-mcp',
         readonly: false,
       });
+      hasGroupGmail = true;
     }
 
     const calendarCredsDir = path.join(credsBase, 'google-calendar-mcp');
@@ -309,6 +313,7 @@ function buildVolumeMounts(
         containerPath: '/home/node/.config/google-calendar-mcp',
         readonly: false,
       });
+      hasGroupCalendar = true;
     }
 
     const driveCredsDir = path.join(credsBase, 'google-drive-mcp');
@@ -318,33 +323,43 @@ function buildVolumeMounts(
         containerPath: '/home/node/.config/google-drive-mcp',
         readonly: false,
       });
-    }
-  } else if (isMain) {
-    const gmailDir = path.join(homeDir, '.gmail-mcp');
-    if (fs.existsSync(gmailDir)) {
-      mounts.push({
-        hostPath: gmailDir,
-        containerPath: '/home/node/.gmail-mcp',
-        readonly: false,
-      });
+      hasGroupDrive = true;
     }
 
-    const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
-    if (fs.existsSync(calendarDir)) {
-      mounts.push({
-        hostPath: calendarDir,
-        containerPath: '/home/node/.config/google-calendar-mcp',
-        readonly: false,
-      });
-    }
+    // Main group: fall back to home-dir credentials for services without per-group creds
+    if (isMain) {
+      if (!hasGroupGmail) {
+        const gmailDir = path.join(homeDir, '.gmail-mcp');
+        if (fs.existsSync(gmailDir)) {
+          mounts.push({
+            hostPath: gmailDir,
+            containerPath: '/home/node/.gmail-mcp',
+            readonly: false,
+          });
+        }
+      }
 
-    const gdriveDir = path.join(homeDir, '.config', 'google-drive-mcp');
-    if (fs.existsSync(gdriveDir)) {
-      mounts.push({
-        hostPath: gdriveDir,
-        containerPath: '/home/node/.config/google-drive-mcp',
-        readonly: false,
-      });
+      if (!hasGroupCalendar) {
+        const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
+        if (fs.existsSync(calendarDir)) {
+          mounts.push({
+            hostPath: calendarDir,
+            containerPath: '/home/node/.config/google-calendar-mcp',
+            readonly: false,
+          });
+        }
+      }
+
+      if (!hasGroupDrive) {
+        const gdriveDir = path.join(homeDir, '.config', 'google-drive-mcp');
+        if (fs.existsSync(gdriveDir)) {
+          mounts.push({
+            hostPath: gdriveDir,
+            containerPath: '/home/node/.config/google-drive-mcp',
+            readonly: false,
+          });
+        }
+      }
     }
   }
 
