@@ -940,6 +940,21 @@ async function processTaskIpc(
       if (data.jid && data.name && data.folder && data.trigger) {
         // Auto-detect DM registrations by JID suffix
         const isDmReg = data.jid.endsWith('@s.whatsapp.net') || data.jid.endsWith('@lid');
+        const isGroupChat = data.jid.endsWith('@g.us');
+
+        // Validation: group chats should never have isMain or alwaysProcess flags
+        // Only DMs can have alwaysProcess, and isMain is only for the actual main group
+        if (isGroupChat && (data.containerConfig?.isMain || data.containerConfig?.alwaysProcess)) {
+          logger.warn(
+            { jid: data.jid, name: data.name },
+            'Invalid group chat registration: group chats cannot have isMain or alwaysProcess flags',
+          );
+          // Sanitize the flags
+          if (data.containerConfig) {
+            delete data.containerConfig.isMain;
+            delete data.containerConfig.alwaysProcess;
+          }
+        }
 
         registerGroup(data.jid, {
           name: data.name,
