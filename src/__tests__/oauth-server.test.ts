@@ -23,6 +23,7 @@ const { tmpBase, gcpKeysPath, mockGetToken, mockGenerateAuthUrl } = vi.hoisted((
 
 // Mock config values
 vi.mock('../config.js', () => ({
+  DATA_DIR: tmpBase,
   GROUPS_DIR: tmpBase,
   GCP_OAUTH_KEYS_PATH: gcpKeysPath,
   OAUTH_CALLBACK_URL: 'http://localhost:0',

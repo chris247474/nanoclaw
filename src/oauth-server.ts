@@ -12,6 +12,7 @@ import { URL } from 'url';
 import { OAuth2Client } from 'google-auth-library';
 
 import {
+  DATA_DIR,
   GCP_OAUTH_KEYS_PATH,
   GROUPS_DIR,
   OAUTH_CALLBACK_URL,
@@ -68,6 +69,34 @@ const DRIVE_SCOPES = [
 
 const pendingSessions = new Map<string, OAuthSession>();
 let oauthServerStarted = false;
+const SESSIONS_FILE = path.join(DATA_DIR, 'oauth_sessions.json');
+
+function persistSessions(): void {
+  const entries = Object.fromEntries(pendingSessions);
+  try {
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(entries, null, 2));
+  } catch (err) {
+    logger.error({ err }, 'Failed to persist OAuth sessions');
+  }
+}
+
+function loadPersistedSessions(): void {
+  try {
+    if (!fs.existsSync(SESSIONS_FILE)) return;
+    const raw = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf-8'));
+    const now = Date.now();
+    for (const [id, session] of Object.entries(raw) as [string, OAuthSession][]) {
+      // Skip expired sessions
+      if (now - session.createdAt > OAUTH_SESSION_TTL_MS) continue;
+      pendingSessions.set(id, session);
+    }
+    if (pendingSessions.size > 0) {
+      logger.info({ count: pendingSessions.size }, 'Restored OAuth sessions from disk');
+    }
+  } catch (err) {
+    logger.error({ err }, 'Failed to load persisted OAuth sessions');
+  }
+}
 
 // --- Exports ---
 
@@ -125,6 +154,7 @@ export function createOAuthSession(
     createdAt: Date.now(),
   };
   pendingSessions.set(sessionId, session);
+  persistSessions();
 
   const oauth2Client = new OAuth2Client(clientId, clientSecret, getRedirectUri());
   const authUrl = oauth2Client.generateAuthUrl({
@@ -153,6 +183,7 @@ export async function handleOAuthCallback(
 
   if (Date.now() - session.createdAt > OAUTH_SESSION_TTL_MS) {
     pendingSessions.delete(state);
+    persistSessions();
     throw new OAuthError('OAuth session expired. Please request a new link.', 'SESSION_EXPIRED');
   }
 
@@ -178,6 +209,7 @@ export async function handleOAuthCallback(
   } catch (err) {
     if (err instanceof OAuthError) throw err;
     pendingSessions.delete(state);
+    persistSessions();
     throw new OAuthError(
       `Token exchange failed: ${err instanceof Error ? err.message : String(err)}`,
       'EXCHANGE_FAILED',
@@ -185,6 +217,7 @@ export async function handleOAuthCallback(
   }
 
   pendingSessions.delete(state);
+  persistSessions();
 
   saveUserTokens(session.groupFolder, session.service, tokens);
 
@@ -253,6 +286,7 @@ export function cleanExpiredSessions(): number {
     }
   }
   if (removed > 0) {
+    persistSessions();
     logger.debug({ removed }, 'Cleaned expired OAuth sessions');
   }
   return removed;
@@ -297,6 +331,7 @@ export function startOAuthServer(
     return null;
   }
   oauthServerStarted = true;
+  loadPersistedSessions();
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://localhost:${OAUTH_PORT}`);
