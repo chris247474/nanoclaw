@@ -16,7 +16,120 @@ import {
 } from './config.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup, TeamConfig } from './types.js';
+import {
+  ActiveContainer,
+  ContainerErrorSummary,
+  RecentContainerRun,
+  RegisteredGroup,
+  TeamConfig,
+} from './types.js';
+
+// --- Container Tracking ---
+
+const activeContainersMap = new Map<
+  string,
+  { pid: number; startTime: number; groupName: string; promptPreview: string }
+>();
+const recentRunsBuffer: RecentContainerRun[] = [];
+const recentErrorsBuffer: ContainerErrorSummary[] = [];
+const MAX_RECENT_RUNS = 20;
+const MAX_RECENT_ERRORS = 10;
+
+export function trackContainerStart(
+  groupFolder: string,
+  info: { pid: number; groupName: string; promptPreview: string },
+): void {
+  activeContainersMap.set(groupFolder, {
+    pid: info.pid,
+    startTime: Date.now(),
+    groupName: info.groupName,
+    promptPreview: info.promptPreview.slice(0, 100),
+  });
+}
+
+export function trackContainerEnd(
+  groupFolder: string,
+  result: { durationMs: number; status: 'success' | 'error' | 'timeout'; errorSummary?: string },
+): void {
+  const entry = activeContainersMap.get(groupFolder);
+  activeContainersMap.delete(groupFolder);
+
+  recentRunsBuffer.push({
+    groupFolder,
+    groupName: entry?.groupName || groupFolder,
+    startedAt: entry ? new Date(entry.startTime).toISOString() : new Date().toISOString(),
+    durationMs: result.durationMs,
+    status: result.status,
+    errorSummary: result.errorSummary?.slice(0, 200),
+  });
+  if (recentRunsBuffer.length > MAX_RECENT_RUNS) recentRunsBuffer.shift();
+}
+
+export function trackContainerError(
+  groupFolder: string,
+  result: { durationMs: number; error: string; type: ContainerErrorSummary['type'] },
+): void {
+  const entry = activeContainersMap.get(groupFolder);
+  activeContainersMap.delete(groupFolder);
+
+  recentRunsBuffer.push({
+    groupFolder,
+    groupName: entry?.groupName || groupFolder,
+    startedAt: entry ? new Date(entry.startTime).toISOString() : new Date().toISOString(),
+    durationMs: result.durationMs,
+    status: 'error',
+    errorSummary: result.error.slice(0, 200),
+  });
+  if (recentRunsBuffer.length > MAX_RECENT_RUNS) recentRunsBuffer.shift();
+
+  recentErrorsBuffer.push({
+    groupFolder,
+    timestamp: new Date().toISOString(),
+    error: result.error.slice(0, 200),
+    type: result.type,
+  });
+  if (recentErrorsBuffer.length > MAX_RECENT_ERRORS) recentErrorsBuffer.shift();
+}
+
+export function getActiveContainers(): ActiveContainer[] {
+  const now = Date.now();
+  return [...activeContainersMap.entries()].map(([folder, entry]) => ({
+    groupFolder: folder,
+    groupName: entry.groupName,
+    pid: entry.pid,
+    startedAt: new Date(entry.startTime).toISOString(),
+    elapsedMs: now - entry.startTime,
+    promptPreview: entry.promptPreview,
+  }));
+}
+
+export function getRecentRuns(): RecentContainerRun[] {
+  return [...recentRunsBuffer];
+}
+
+export function getRecentErrors(): ContainerErrorSummary[] {
+  return [...recentErrorsBuffer];
+}
+
+export function killContainer(groupFolder: string): boolean {
+  const entry = activeContainersMap.get(groupFolder);
+  if (!entry) return false;
+  try {
+    process.kill(entry.pid, 'SIGKILL');
+    activeContainersMap.delete(groupFolder);
+    logger.info({ groupFolder, pid: entry.pid }, 'Container killed via debug command');
+    return true;
+  } catch (err) {
+    logger.error({ groupFolder, pid: entry.pid, err }, 'Failed to kill container');
+    return false;
+  }
+}
+
+export function resetTracking(): void {
+  activeContainersMap.clear();
+  recentRunsBuffer.length = 0;
+  recentErrorsBuffer.length = 0;
+}
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -384,6 +497,15 @@ export async function runContainerAgent(
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
+    // Track active container for diagnostics
+    if (container.pid) {
+      trackContainerStart(group.folder, {
+        pid: container.pid,
+        groupName: group.name,
+        promptPreview: input.prompt.slice(0, 100),
+      });
+    }
+
     let stdout = '';
     let stderr = '';
     let stdoutTruncated = false;
@@ -431,6 +553,11 @@ export async function runContainerAgent(
     const timeout = setTimeout(() => {
       logger.error({ group: group.name }, 'Container timeout, killing');
       container.kill('SIGKILL');
+      trackContainerError(group.folder, {
+        durationMs: Date.now() - startTime,
+        error: `Container timed out after ${CONTAINER_TIMEOUT}ms`,
+        type: 'timeout',
+      });
       resolve({
         status: 'error',
         result: null,
@@ -518,6 +645,12 @@ export async function runContainerAgent(
           'Container exited with error',
         );
 
+        trackContainerError(group.folder, {
+          durationMs: duration,
+          error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
+          type: 'exit_code',
+        });
+
         resolve({
           status: 'error',
           result: null,
@@ -554,6 +687,12 @@ export async function runContainerAgent(
           'Container completed',
         );
 
+        trackContainerEnd(group.folder, {
+          durationMs: duration,
+          status: output.status === 'error' ? 'error' : 'success',
+          errorSummary: output.error,
+        });
+
         resolve(output);
       } catch (err) {
         logger.error(
@@ -564,6 +703,12 @@ export async function runContainerAgent(
           },
           'Failed to parse container output',
         );
+
+        trackContainerError(group.folder, {
+          durationMs: duration,
+          error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
+          type: 'parse_error',
+        });
 
         resolve({
           status: 'error',
@@ -576,6 +721,11 @@ export async function runContainerAgent(
     container.on('error', (err) => {
       clearTimeout(timeout);
       logger.error({ group: group.name, error: err }, 'Container spawn error');
+      trackContainerError(group.folder, {
+        durationMs: Date.now() - startTime,
+        error: `Container spawn error: ${err.message}`,
+        type: 'spawn_error',
+      });
       resolve({
         status: 'error',
         result: null,

@@ -103,6 +103,57 @@ export interface TaskRunLog {
   error: string | null;
 }
 
+// --- Diagnostics types ---
+
+export interface ActiveContainer {
+  groupFolder: string;
+  groupName: string;
+  pid: number;
+  startedAt: string;
+  elapsedMs: number;
+  promptPreview: string;
+}
+
+export interface RecentContainerRun {
+  groupFolder: string;
+  groupName: string;
+  startedAt: string;
+  durationMs: number;
+  status: 'success' | 'error' | 'timeout';
+  errorSummary?: string;
+}
+
+export interface ContainerErrorSummary {
+  groupFolder: string;
+  timestamp: string;
+  error: string;
+  type: 'exit_code' | 'timeout' | 'spawn_error' | 'parse_error';
+}
+
+export interface DiagnosticsSnapshot {
+  timestamp: string;
+  process: {
+    uptime_ms: number;
+    memory_mb: number;
+    node_version: string;
+    pid: number;
+    started_at: string;
+  };
+  containers: {
+    active: ActiveContainer[];
+    recent: RecentContainerRun[];
+  };
+  messaging: {
+    last_message_processed: string | null;
+    registered_groups_count: number;
+    whatsapp_connected: boolean;
+  };
+  errors: {
+    recent_container_errors: ContainerErrorSummary[];
+    last_error_at: string | null;
+  };
+}
+
 // --- Multi-team / Org mode types ---
 
 export interface OrgConfig {

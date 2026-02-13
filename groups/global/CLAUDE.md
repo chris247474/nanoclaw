@@ -95,6 +95,40 @@ Files you create are saved in `/workspace/group/`. Use this for notes, research,
 
 Your `CLAUDE.md` file in that folder is your memory - update it with important context you want to remember.
 
+## Troubleshooting & Diagnostics — Admin Only
+
+You have diagnostic tools available when running in main/admin context. Use these when Chris reports issues or when you receive error notifications.
+
+### Quick Health Check
+1. Call `get_diagnostics` to see system health
+2. Check: process uptime, memory usage, active containers, recent errors
+
+### Investigating Container Failures
+1. Check `get_diagnostics` → `errors.recent_container_errors` for recent failures
+2. Read container logs at `/workspace/project/groups/{folder}/logs/` (most recent file)
+3. Check the NanoClaw service log at `/workspace/project/logs/nanoclaw.log`
+
+### Killing a Stuck Container
+1. Call `get_diagnostics` to see `containers.active`
+2. If a container has been running too long (>5 minutes by default), call `kill_stuck_agent` with the group folder
+
+### Restarting the Service
+Use `restart_service` ONLY as a last resort. This kills everything including your own container. The service restarts automatically via launchd within seconds.
+
+### Fixing Code Issues
+You have full access to `/workspace/project/src/`. You can:
+1. Read and modify source code
+2. Run `cd /workspace/project && npm run build` to compile
+3. Run `cd /workspace/project && npm test` to verify
+4. Run `cd /workspace/project && ./container/build.sh` to rebuild the container image
+5. Use `restart_service` to apply changes
+
+### Common Failure Modes
+- **Container timeout**: Agent took >5 minutes. Check if the prompt caused an infinite loop or expensive operation.
+- **Parse error**: Container stdout did not contain valid JSON between sentinel markers. Check container logs for crash output.
+- **Spawn error**: Apple Container system may not be running. Service restart usually fixes this.
+- **WhatsApp disconnect**: The bot auto-reconnects. If stuck, restart the service.
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.

@@ -476,6 +476,125 @@ Service options:
 
           return { content: [{ type: 'text', text: `DM request for ${args.jid} denied.` }] };
         }
+      ),
+
+      // --- Diagnostic tools (admin only) ---
+
+      tool(
+        'get_diagnostics',
+        `Get system diagnostics including process health, active containers, recent runs, and errors.
+Reads the diagnostics snapshot written by the host before this container launched.
+Use this to investigate issues, check what containers are running, and see recent failures.
+Main/admin group only.`,
+        {},
+        async () => {
+          if (!isMain) {
+            return {
+              content: [{ type: 'text', text: 'Only main/admin group can access diagnostics.' }],
+              isError: true,
+            };
+          }
+
+          const diagPath = path.join(IPC_DIR, 'diagnostics.json');
+          if (!fs.existsSync(diagPath)) {
+            return {
+              content: [{ type: 'text', text: 'No diagnostics snapshot available. This may be the first run.' }],
+            };
+          }
+
+          try {
+            const data = JSON.parse(fs.readFileSync(diagPath, 'utf-8'));
+            return {
+              content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+            };
+          } catch (err) {
+            return {
+              content: [{ type: 'text', text: `Error reading diagnostics: ${err instanceof Error ? err.message : String(err)}` }],
+              isError: true,
+            };
+          }
+        }
+      ),
+
+      tool(
+        'refresh_diagnostics',
+        'Request the host to refresh the diagnostics snapshot with current data. After calling this, wait a moment then call get_diagnostics to read fresh data. Main/admin only.',
+        {},
+        async () => {
+          if (!isMain) {
+            return {
+              content: [{ type: 'text', text: 'Only main/admin group can refresh diagnostics.' }],
+              isError: true,
+            };
+          }
+
+          writeIpcFile(TASKS_DIR, {
+            type: 'refresh_diagnostics',
+            timestamp: new Date().toISOString(),
+          });
+
+          return {
+            content: [{ type: 'text', text: 'Diagnostics refresh requested. Use get_diagnostics to read the updated snapshot.' }],
+          };
+        }
+      ),
+
+      tool(
+        'kill_stuck_agent',
+        'Kill a stuck container agent by group folder name. Use get_diagnostics first to see active containers and identify which one is stuck. Main/admin only.',
+        {
+          group_folder: z.string().describe('The group folder of the stuck agent (e.g., "family-chat")'),
+        },
+        async (args) => {
+          if (!isMain) {
+            return {
+              content: [{ type: 'text', text: 'Only main/admin group can kill agents.' }],
+              isError: true,
+            };
+          }
+
+          writeIpcFile(TASKS_DIR, {
+            type: 'kill_container',
+            targetGroupFolder: args.group_folder,
+            timestamp: new Date().toISOString(),
+          });
+
+          return {
+            content: [{ type: 'text', text: `Kill request sent for container in group "${args.group_folder}". The container will be terminated.` }],
+          };
+        }
+      ),
+
+      tool(
+        'restart_service',
+        `Restart the entire NanoClaw service via launchctl. WARNING: This will kill ALL active containers including this one. The service will restart automatically via launchd. Use only as a last resort when the bot is in a bad state. Main/admin only.`,
+        {},
+        async () => {
+          if (!isMain) {
+            return {
+              content: [{ type: 'text', text: 'Only main/admin group can restart the service.' }],
+              isError: true,
+            };
+          }
+
+          // Send notification before restart since this container will die
+          writeIpcFile(MESSAGES_DIR, {
+            type: 'message',
+            chatJid,
+            text: 'Restarting NanoClaw service now. I will be back online in a few seconds.',
+            groupFolder,
+            timestamp: new Date().toISOString(),
+          });
+
+          writeIpcFile(TASKS_DIR, {
+            type: 'restart_service',
+            timestamp: new Date().toISOString(),
+          });
+
+          return {
+            content: [{ type: 'text', text: 'Service restart initiated. This container will terminate shortly.' }],
+          };
+        }
       )
     ]
   });
