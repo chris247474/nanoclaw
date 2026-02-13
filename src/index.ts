@@ -309,16 +309,10 @@ async function processMessage(msg: NewMessage): Promise<void> {
         phone,
       });
 
-      // Notify admin's main chat
-      const mainJid = Object.keys(registeredGroups).find(
-        (jid) => registeredGroups[jid].folder === MAIN_GROUP_FOLDER,
+      // Notify all admin channels
+      await notifyAdmins(
+        `${ASSISTANT_NAME}: New DM registration request from ${msg.sender_name || phone} (${phone}).\nMessage: "${dmContent}"\n\nTo approve, use register_group with JID: ${msg.chat_jid}, folder: dm-${phone}`,
       );
-      if (mainJid) {
-        await sendMessage(
-          mainJid,
-          `${ASSISTANT_NAME}: New DM registration request from ${msg.sender_name || phone} (${phone}).\nMessage: "${dmContent}"\n\nTo approve, use register_group with JID: ${msg.chat_jid}, folder: dm-${phone}`,
-        );
-      }
 
       logger.info(
         { jid: msg.chat_jid, phone, senderName: msg.sender_name },
@@ -381,7 +375,9 @@ async function processMessage(msg: NewMessage): Promise<void> {
     }
   }
 
-  const shouldAlwaysProcess = isMainGroup || group.alwaysProcess;
+  // Only DMs (alwaysProcess) should auto-respond without trigger/mention
+  // Admin groups and non-admin groups both require trigger or mention
+  const shouldAlwaysProcess = group.alwaysProcess;
   if (!shouldAlwaysProcess && !hasTrigger && !hasMention) return;
 
   // Get all messages since last agent interaction so the session has full context
@@ -554,29 +550,33 @@ async function runAgent(
   }
 }
 
+function getAdminJids(): string[] {
+  return Object.keys(registeredGroups).filter(
+    (jid) => registeredGroups[jid].folder === MAIN_GROUP_FOLDER || registeredGroups[jid].isMain,
+  );
+}
+
+async function notifyAdmins(text: string, excludeFolder?: string): Promise<void> {
+  for (const jid of getAdminJids()) {
+    if (excludeFolder && registeredGroups[jid]?.folder === excludeFolder) continue;
+    try {
+      await sendMessage(jid, text);
+    } catch {
+      logger.error({ jid }, 'Failed to send admin notification');
+    }
+  }
+}
+
 async function notifyAdminError(failedGroup: RegisteredGroup, errorSummary: string): Promise<void> {
   // Don't notify about failures in admin groups (prevents infinite loop)
   const isAdminGroup = failedGroup.folder === MAIN_GROUP_FOLDER || failedGroup.isMain;
   if (isAdminGroup) return;
 
-  // Find an admin JID to notify
-  const adminJid = Object.keys(registeredGroups).find(
-    (jid) => registeredGroups[jid].folder === MAIN_GROUP_FOLDER || registeredGroups[jid].isMain,
-  );
-  if (!adminJid) return;
-
   const truncatedError = errorSummary.slice(0, 200);
   const logHint = `groups/${failedGroup.folder}/logs/`;
-
-  try {
-    await sendMessage(
-      adminJid,
-      `${ASSISTANT_NAME}: [Agent Error] "${failedGroup.name}" failed.\nError: ${truncatedError}\nLogs: ${logHint}`,
-    );
-  } catch {
-    // Don't let notification failure break the flow
-    logger.error({ group: failedGroup.name }, 'Failed to send admin error notification');
-  }
+  await notifyAdmins(
+    `${ASSISTANT_NAME}: [Agent Error] "${failedGroup.name}" failed.\nError: ${truncatedError}\nLogs: ${logHint}`,
+  );
 }
 
 async function sendMessage(jid: string, text: string): Promise<void> {

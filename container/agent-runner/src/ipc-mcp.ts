@@ -339,11 +339,11 @@ SCHEDULE VALUE FORMAT (all times are LOCAL timezone):
         `Register a new WhatsApp group or approve a pending DM request. Main group only.
 
 For groups: use available_groups.json to find the JID. Folder name should be lowercase with hyphens (e.g., "family-chat").
-For DMs: use pending_dm_requests.json to find the JID. Folder name should be "dm-{phone}" (e.g., "dm-639524538012"). DM registrations automatically get always-process and per-user credential isolation.`,
+For DMs: use pending_dm_requests.json to find the JID. Folder name should be "dm-{phone}" (e.g., "dm-15551234567"). DM registrations automatically get always-process and per-user credential isolation.`,
         {
-          jid: z.string().describe('The WhatsApp JID (e.g., "120363336345536173@g.us" for groups, "639524538012@s.whatsapp.net" for DMs)'),
+          jid: z.string().describe('The WhatsApp JID (e.g., "120363001234567890@g.us" for groups, "15551234567@s.whatsapp.net" for DMs)'),
           name: z.string().describe('Display name for the group/user'),
-          folder: z.string().describe('Folder name (e.g., "family-chat" for groups, "dm-639524538012" for DMs)'),
+          folder: z.string().describe('Folder name (e.g., "family-chat" for groups, "dm-15551234567" for DMs)'),
           trigger: z.string().describe('Trigger word (e.g., "@Andy")')
         },
         async (args) => {

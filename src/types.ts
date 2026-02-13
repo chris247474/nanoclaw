@@ -46,7 +46,7 @@ export interface RegisteredGroup {
 }
 
 export interface PendingDmRequest {
-  jid: string; // Phone JID (e.g., "639524538012@s.whatsapp.net")
+  jid: string; // Phone JID (e.g., "15551234567@s.whatsapp.net")
   senderName?: string; // Push name from WhatsApp
   requestedAt: string; // ISO timestamp
   triggerMessage: string; // The message that triggered the request

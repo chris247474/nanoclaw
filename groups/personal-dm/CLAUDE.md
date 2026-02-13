@@ -61,30 +61,36 @@ Finally add a post completion merge order to minimize conflicts. Create a new br
 1. **Validate the Why**
    - Is this solving a real problem or feature creep?
    - What's the opportunity cost vs other priorities?
-   - Does this fit agent-led growth strategy?
+   - Does it fit the project's architecture and direction?
 
-2. **Planning Phase (TDD)**
+2. **Planning Phase**
+   - Produce the Orchestration & Parallelization Matrix (Section 6)
+   - Identify shared contracts needed (Section 7)
+   - Flag tasks requiring manual testing
    - Write test cases FIRST (what success looks like)
-   - Write tests that match the intended logic, make sure the tests fail on current logic that is non compliant, then write or revise the current logic to match the test. If it is a large task or epic level feature request, break down the task into subtasks and mark which of these sub tasks needs manual testing vs what can be built following TDD by a sub agent or agents in parallel.
+   - Write tests that match the intended logic, make sure the tests fail on current logic that is non-compliant, then write or revise the current logic to match the test
+   - If it is a large task or epic-level feature request, break down the task into subtasks and mark which of these subtasks needs manual testing vs what can be built following TDD by a parallel agent or sub-agent
    - API contract/interface design
    - Edge cases and failure modes
    - Dependencies and breaking changes
 
 3. **Implementation**
+   - All agents follow TDD Protocol (Section 3)
    - Minimal viable version first
-   - Clear documentation (machine-readable)
    - Migration path if changing existing behavior
 
 4. **Delivery Format**
    - Priority assessment (high/medium/low with reasoning)
-   - Effort estimate (hours/days, not "small/large")
+   - Orchestration matrix with token estimates
    - Risk analysis (what could go wrong)
    - Code with tests, not just pseudocode
 
 **Red flags to call out:**
 - Feature doesn't have clear success metric
 - Adds complexity without proportional value
-- Conflicts with API-first architecture
+- Conflicts with existing architecture
+
+**IMPORTANT:** Never take a seeming feature or bug fix request and implement it right away. First investigate, triage and come back for approval from my account by tagging me.
 
 ---
 
@@ -95,17 +101,22 @@ Finally add a post completion merge order to minimize conflicts. Create a new br
 1. **Confirm the Bug**
    - Reproduce the issue from my description
    - Distinguish: actual bug vs expected behavior I don't like
-   - Assess: critical (blocks work), major (workaround exists), minor (cosmetic)
+   - Assess severity: critical (blocks work), major (workaround exists), minor (cosmetic)
 
 2. **Root Cause Analysis**
    - Don't just fix symptoms
    - Show me *why* it broke (what assumption failed)
-   - Check if other areas have same vulnerability
+   - Check if other areas have the same vulnerability
 
-3. **Fix Approach (TDD)**
+3. **Fix Approach (TDD — no sub-agents for bug fixes)**
+   - Checkout from develop, create a bugfix branch and worktree
    - Write failing test that captures the bug
    - Minimal change to make test pass
    - Verify no regressions
+   - Run tests specific to the changes to be sure nothing else has broken
+   - Pull develop into bugfix branch, resolve any merge conflicts
+   - Run entire test suite to ensure nothing else has broken
+   - Create PR to develop
 
 4. **Delivery Format**
    - Severity classification with reasoning
@@ -113,12 +124,14 @@ Finally add a post completion merge order to minimize conflicts. Create a new br
    - Fix with before/after test results
    - Prevention: how to avoid this class of bug going forward
 
-5. For bugfixes, there is no need for sub agents. Just proceed by following TDD and write both unit, integration and E2E tests (for logic libraries, API requests, UI level interactions respectively) and avoid regressions of the same bug in the future.
+5. For bug fixes, there is no need for sub-agents. Proceed by following TDD and write unit, integration, and E2E tests (for logic libraries, API requests, UI-level interactions respectively) to avoid regressions of the same bug in the future.
 
 **Red flags to call out:**
 - If the "bug" is actually a feature request in disguise
 - If fixing properly requires architectural changes (then it's a refactor, not a patch)
 - If I'm papering over a deeper system design flaw
+
+**IMPORTANT:** Never take a seeming feature or bug fix request and implement it right away. First investigate, triage and come back for approval from my account by tagging me.
 
 ---
 
@@ -133,8 +146,7 @@ Finally add a post completion merge order to minimize conflicts. Create a new br
 2. **Research Approach**
    - Primary sources over summaries when possible
    - Quantitative data over anecdotes
-   - Recent data (post-2024) for market trends
-   - Historical patterns for financial/crypto analysis
+   - Recent data for evolving domains
 
 3. **Analysis Structure**
    - Key findings (3-5 bullets, no fluff)
@@ -179,6 +191,24 @@ Finally add a post completion merge order to minimize conflicts. Create a new br
 - If task is actually multiple tasks that should be separated
 - If I'm asking you to do something I should delegate to a specialist
 - If this is busy work avoiding higher-leverage activities
+
+---
+
+## Anti-Patterns to Avoid
+
+| Anti-Pattern | Why It's Bad | Do This Instead |
+|---|---|---|
+| **No shared contracts** | Agents independently define overlapping types → merge hell | Phase 0: define contracts before any agent starts |
+| **Big bang merge** | All agents merge at end → conflicts compound, context is stale | Merge and test after EACH agent |
+| **No orchestrator review** | Agent output goes straight to dependent agents without verification | Orchestrator reviews every PR before merge |
+| **Copy-paste context** | Describing interfaces in prose → agents guess wrong | Feed actual merged code as context |
+| **Parallel everything** | Running dependent agents in parallel with stubs → integration failures | Wait for real implementations, then feed forward |
+| **All-Opus sub-agents** | Burns quota ~5x faster for tasks Sonnet handles equally well | Sonnet for parallel agents, Haiku for sub-agents |
+| **Parallel agents in same directory** | One checkout moves the working tree for all others | Git worktrees: one per parallel agent |
+| **Sub-agents on their own branches** | Coordination overhead exceeds benefit | Sub-agents commit to parent agent's branch |
+| **Changing tests to fix merge failures** | Tests encode intended behavior — changing them hides bugs | Fix implementation to match tests; only change tests with user approval |
+| **Spawning sub-agents for complex tasks** | Haiku can't handle investigation or cross-cutting concerns | Keep complex work in the parallel agent (Sonnet) |
+| **No parallelization matrix** | Ad-hoc agent spawning leads to dependency violations and wasted tokens | Always produce the matrix before launching agents |
 
 ---
 
