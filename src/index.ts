@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { exec, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -25,11 +26,13 @@ import {
 import {
   AvailableGroup,
   OrgMountContext,
+  killContainer,
   runContainerAgent,
   writeGroupsSnapshot,
   writeOrgContext,
   writeTasksSnapshot,
 } from './container-runner.js';
+import { writeDiagnosticsSnapshot } from './diagnostics.js';
 import { loadOrgConfig, findTeamByJid, findTeamByGroupName, isAdminJid, isAdminGroupName } from './org-config.js';
 import {
   getAllChats,
@@ -68,6 +71,10 @@ let ipcWatcherRunning = false;
 // Track IPC messages sent per chat to suppress duplicate final result
 let ipcMessagesSent: Record<string, number> = {};
 let groupSyncTimerStarted = false;
+// Per-admin loop timestamps (independent of global lastTimestamp)
+let adminTimestamps: Record<string, string> = {};
+// Track which admin loops are already running to prevent duplicates
+const adminLoopsRunning = new Set<string>();
 
 /**
  * Translate a JID from LID format to phone format if we have a mapping.
@@ -97,9 +104,11 @@ function loadState(): void {
   const state = loadJson<{
     last_timestamp?: string;
     last_agent_timestamp?: Record<string, string>;
+    admin_timestamps?: Record<string, string>;
   }>(statePath, {});
   lastTimestamp = state.last_timestamp || '';
   lastAgentTimestamp = state.last_agent_timestamp || {};
+  adminTimestamps = state.admin_timestamps || {};
   sessions = loadJson(path.join(DATA_DIR, 'sessions.json'), {});
   registeredGroups = loadJson(
     path.join(DATA_DIR, 'registered_groups.json'),
@@ -124,6 +133,7 @@ function saveState(): void {
   saveJson(path.join(DATA_DIR, 'router_state.json'), {
     last_timestamp: lastTimestamp,
     last_agent_timestamp: lastAgentTimestamp,
+    admin_timestamps: adminTimestamps,
   });
   saveJson(path.join(DATA_DIR, 'sessions.json'), sessions);
 }
@@ -266,6 +276,29 @@ async function processMessage(msg: NewMessage): Promise<void> {
   if (!group && (msg.chat_jid.endsWith('@s.whatsapp.net') || msg.chat_jid.endsWith('@lid'))) {
     const dmContent = msg.content.trim();
 
+    // Fast-path: handle Google OAuth setup directly without container agent
+    if (/\b(setup|connect|link|auth)\b.*\b(google|gmail|calendar|drive)\b/i.test(dmContent) ||
+        /\b(google|gmail|calendar|drive)\b.*\b(setup|connect|link|auth)\b/i.test(dmContent)) {
+      const phone = msg.chat_jid.split('@')[0];
+      const folder = `dm-${phone}`;
+      try {
+        const service: OAuthService = /\bgmail\b/i.test(dmContent) ? 'gmail'
+          : /\bcalendar\b/i.test(dmContent) ? 'calendar'
+          : /\bdrive\b/i.test(dmContent) ? 'drive'
+          : 'all';
+        const { authUrl } = createOAuthSession(msg.chat_jid, folder, service);
+        await sendMessage(
+          msg.chat_jid,
+          `${ASSISTANT_NAME}: To connect your Google account, click this link:\n\n${authUrl}\n\nThis link expires in 10 minutes.`,
+        );
+        logger.info({ jid: msg.chat_jid, folder, service }, 'OAuth URL sent to unregistered DM user');
+      } catch (err) {
+        logger.error({ err, jid: msg.chat_jid }, 'Failed to create OAuth session for unregistered DM');
+        await sendMessage(msg.chat_jid, `${ASSISTANT_NAME}: Failed to start Google setup. Please try again later.`);
+      }
+      return;
+    }
+
     if (!isPending(msg.chat_jid)) {
       const phone = msg.chat_jid.split('@')[0];
       addPendingRequest({
@@ -309,6 +342,28 @@ async function processMessage(msg: NewMessage): Promise<void> {
 
   const content = msg.content.trim();
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER || group.isMain;
+
+  // Fast-path: registered DM users requesting Google OAuth — handle directly without container
+  if (group.isDm &&
+      (/\b(setup|connect|link|auth)\b.*\b(google|gmail|calendar|drive)\b/i.test(content) ||
+       /\b(google|gmail|calendar|drive)\b.*\b(setup|connect|link|auth)\b/i.test(content))) {
+    try {
+      const service: OAuthService = /\bgmail\b/i.test(content) ? 'gmail'
+        : /\bcalendar\b/i.test(content) ? 'calendar'
+        : /\bdrive\b/i.test(content) ? 'drive'
+        : 'all';
+      const { authUrl } = createOAuthSession(msg.chat_jid, group.folder, service);
+      await sendMessage(
+        msg.chat_jid,
+        `${ASSISTANT_NAME}: To connect your Google account, click this link:\n\n${authUrl}\n\nThis link expires in 10 minutes.`,
+      );
+      logger.info({ jid: msg.chat_jid, folder: group.folder, service }, 'OAuth URL sent to registered DM user (fast-path)');
+    } catch (err) {
+      logger.error({ err, jid: msg.chat_jid }, 'Failed to create OAuth session');
+      await sendMessage(msg.chat_jid, `${ASSISTANT_NAME}: Failed to start Google setup. Please try again later.`);
+    }
+    return;
+  }
 
   // Main group responds to all messages; other groups require trigger prefix or @mention
   const hasTrigger = TRIGGER_PATTERN.test(content);
@@ -456,6 +511,15 @@ async function runAgent(
     });
   }
 
+  // Write diagnostics snapshot for admin channels
+  if (isMain || isAdmin) {
+    writeDiagnosticsSnapshot(group.folder, {
+      lastMessageProcessed: lastTimestamp || null,
+      registeredGroupsCount: Object.keys(registeredGroups).length,
+      whatsappConnected: !!sock?.user,
+    }, DATA_DIR);
+  }
+
   try {
     const output = await runContainerAgent(group, {
       prompt,
@@ -479,13 +543,40 @@ async function runAgent(
         { group: group.name, error: output.error },
         'Container agent error',
       );
+      await notifyAdminError(group, output.error || 'Unknown error');
       return null;
     }
 
     return output.result;
   } catch (err) {
     logger.error({ group: group.name, err }, 'Agent error');
+    await notifyAdminError(group, err instanceof Error ? err.message : String(err));
     return null;
+  }
+}
+
+async function notifyAdminError(failedGroup: RegisteredGroup, errorSummary: string): Promise<void> {
+  // Don't notify about failures in admin groups (prevents infinite loop)
+  const isAdminGroup = failedGroup.folder === MAIN_GROUP_FOLDER || failedGroup.isMain;
+  if (isAdminGroup) return;
+
+  // Find an admin JID to notify
+  const adminJid = Object.keys(registeredGroups).find(
+    (jid) => registeredGroups[jid].folder === MAIN_GROUP_FOLDER || registeredGroups[jid].isMain,
+  );
+  if (!adminJid) return;
+
+  const truncatedError = errorSummary.slice(0, 200);
+  const logHint = `groups/${failedGroup.folder}/logs/`;
+
+  try {
+    await sendMessage(
+      adminJid,
+      `${ASSISTANT_NAME}: [Agent Error] "${failedGroup.name}" failed.\nError: ${truncatedError}\nLogs: ${logHint}`,
+    );
+  } catch {
+    // Don't let notification failure break the flow
+    logger.error({ group: failedGroup.name }, 'Failed to send admin error notification');
   }
 }
 
@@ -650,6 +741,8 @@ async function processTaskIpc(
     containerConfig?: RegisteredGroup['containerConfig'];
     // For request_google_oauth
     service?: string;
+    // For kill_container
+    targetGroupFolder?: string;
   },
   sourceGroup: string, // Verified identity from IPC directory
   isMain: boolean, // Verified from directory path
@@ -954,6 +1047,43 @@ async function processTaskIpc(
       break;
     }
 
+    case 'refresh_diagnostics':
+      if (isMain) {
+        writeDiagnosticsSnapshot(sourceGroup, {
+          lastMessageProcessed: lastTimestamp || null,
+          registeredGroupsCount: Object.keys(registeredGroups).length,
+          whatsappConnected: !!sock?.user,
+        }, DATA_DIR);
+        logger.info({ sourceGroup }, 'Diagnostics refreshed via IPC');
+      }
+      break;
+
+    case 'kill_container':
+      if (isMain && data.targetGroupFolder) {
+        const killed = killContainer(data.targetGroupFolder);
+        logger.info(
+          { targetGroup: data.targetGroupFolder, killed, sourceGroup },
+          'Kill container requested via IPC',
+        );
+      } else if (!isMain) {
+        logger.warn({ sourceGroup }, 'Unauthorized kill_container attempt blocked');
+      }
+      break;
+
+    case 'restart_service':
+      if (isMain) {
+        logger.info({ sourceGroup }, 'Service restart requested via IPC');
+        exec(
+          `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`,
+          (err) => {
+            if (err) logger.error({ err }, 'Failed to restart service via launchctl');
+          },
+        );
+      } else {
+        logger.warn({ sourceGroup }, 'Unauthorized restart_service attempt blocked');
+      }
+      break;
+
     default:
       logger.warn({ type: data.type }, 'Unknown IPC task type');
   }
@@ -1032,7 +1162,24 @@ async function connectWhatsApp(): Promise<void> {
         getSessions: () => sessions,
       });
       startIpcWatcher();
-      startOAuthServer(sendMessage);
+      startOAuthServer(sendMessage, async (session) => {
+        // Auto-register DM user on successful OAuth completion
+        if (!registeredGroups[session.userJid]) {
+          registerGroup(session.userJid, {
+            name: session.groupFolder,
+            folder: session.groupFolder,
+            trigger: `@${ASSISTANT_NAME}`,
+            added_at: new Date().toISOString(),
+            isDm: true,
+            alwaysProcess: true,
+          });
+          removePendingRequest(session.userJid);
+          logger.info(
+            { jid: session.userJid, folder: session.groupFolder },
+            'DM user auto-registered after OAuth',
+          );
+        }
+      });
       startMessageLoop();
 
       // Periodic cleanup of old incoming media files
@@ -1126,6 +1273,16 @@ async function startMessageLoop(): Promise<void> {
   messageLoopRunning = true;
   logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
 
+  // Launch independent loops for admin channels so they're never blocked
+  // by a stuck container in a non-admin group
+  const adminJids = new Set<string>();
+  for (const [jid, group] of Object.entries(registeredGroups)) {
+    if (group.isMain || group.folder === MAIN_GROUP_FOLDER) {
+      adminJids.add(jid);
+      startAdminLoop(jid);
+    }
+  }
+
   while (true) {
     try {
       // Include registered groups + all known group chats (for auto-registration)
@@ -1141,7 +1298,17 @@ async function startMessageLoop(): Promise<void> {
       for (const req of loadPendingRequests()) {
         registeredJids.add(req.jid);
       }
-      const jids = [...registeredJids];
+
+      // Check for newly-registered admin channels and start their loops
+      for (const [jid, group] of Object.entries(registeredGroups)) {
+        if ((group.isMain || group.folder === MAIN_GROUP_FOLDER) && !adminJids.has(jid)) {
+          adminJids.add(jid);
+          startAdminLoop(jid);
+        }
+      }
+
+      // Exclude admin JIDs — they have their own independent loops
+      const jids = [...registeredJids].filter((jid) => !adminJids.has(jid));
       const { messages } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
 
       if (messages.length > 0)
@@ -1163,6 +1330,52 @@ async function startMessageLoop(): Promise<void> {
       }
     } catch (err) {
       logger.error({ err }, 'Error in message loop');
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+  }
+}
+
+/**
+ * Independent processing loop for a single admin channel.
+ * Runs concurrently with the main loop via JS async interleaving —
+ * while the main loop awaits a stuck container, this loop keeps processing.
+ */
+async function startAdminLoop(adminJid: string): Promise<void> {
+  if (adminLoopsRunning.has(adminJid)) return;
+  adminLoopsRunning.add(adminJid);
+
+  const group = registeredGroups[adminJid];
+  const label = group?.folder || adminJid;
+  logger.info({ jid: adminJid, folder: label }, 'Starting independent admin loop');
+
+  // Use per-admin timestamp, falling back to global
+  if (!adminTimestamps[adminJid]) {
+    adminTimestamps[adminJid] = lastTimestamp;
+  }
+
+  while (true) {
+    try {
+      const { messages } = getNewMessages(
+        [adminJid],
+        adminTimestamps[adminJid],
+        ASSISTANT_NAME,
+      );
+
+      for (const msg of messages) {
+        try {
+          await processMessage(msg);
+          adminTimestamps[adminJid] = msg.timestamp;
+          saveState();
+        } catch (err) {
+          logger.error(
+            { err, msg: msg.id, adminJid },
+            'Error in admin loop, will retry',
+          );
+          break;
+        }
+      }
+    } catch (err) {
+      logger.error({ err, adminJid }, 'Error in admin loop');
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
   }

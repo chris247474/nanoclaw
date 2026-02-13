@@ -290,6 +290,7 @@ h1{color:#dc2626;font-size:1.5rem}p{color:#4b5563;line-height:1.6}</style></head
 
 export function startOAuthServer(
   sendNotification: (jid: string, text: string) => Promise<void>,
+  onAuthComplete?: (session: OAuthSession) => Promise<void>,
 ): http.Server | null {
   if (oauthServerStarted) {
     logger.debug('OAuth server already running, skipping duplicate start');
@@ -337,6 +338,11 @@ export function startOAuthServer(
           session.userJid,
           `Google account connected! ${serviceLabel} tools are now available. Just send me a message to use them.`,
         );
+
+        // Auto-register the user if not already registered
+        if (onAuthComplete) {
+          await onAuthComplete(session);
+        }
       } catch (err) {
         const message = err instanceof OAuthError ? err.message : 'An unexpected error occurred.';
         logger.error({ err }, 'OAuth callback error');
