@@ -277,8 +277,8 @@ async function processMessage(msg: NewMessage): Promise<void> {
     const dmContent = msg.content.trim();
 
     // Fast-path: handle Google OAuth setup directly without container agent
-    if (/\b(setup|connect|link|auth)\b.*\b(google|gmail|calendar|drive)\b/i.test(dmContent) ||
-        /\b(google|gmail|calendar|drive)\b.*\b(setup|connect|link|auth)\b/i.test(dmContent)) {
+    if (/\b(set\s*up|connect|link|auth)\b.*\b(google|gmail|calendar|drive)\b/i.test(dmContent) ||
+        /\b(google|gmail|calendar|drive)\b.*\b(set\s*up|connect|link|auth)\b/i.test(dmContent)) {
       const phone = msg.chat_jid.split('@')[0];
       const folder = `dm-${phone}`;
       try {
@@ -345,8 +345,8 @@ async function processMessage(msg: NewMessage): Promise<void> {
 
   // Fast-path: registered DM users requesting Google OAuth — handle directly without container
   if (group.isDm &&
-      (/\b(setup|connect|link|auth)\b.*\b(google|gmail|calendar|drive)\b/i.test(content) ||
-       /\b(google|gmail|calendar|drive)\b.*\b(setup|connect|link|auth)\b/i.test(content))) {
+      (/\b(set\s*up|connect|link|auth)\b.*\b(google|gmail|calendar|drive)\b/i.test(content) ||
+       /\b(google|gmail|calendar|drive)\b.*\b(set\s*up|connect|link|auth)\b/i.test(content))) {
     try {
       const service: OAuthService = /\bgmail\b/i.test(content) ? 'gmail'
         : /\bcalendar\b/i.test(content) ? 'calendar'
