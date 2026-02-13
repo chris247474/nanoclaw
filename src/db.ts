@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { proto } from '@whiskeysockets/baileys';
+import { normalizeMessageContent, proto } from '@whiskeysockets/baileys';
 
 import { STORE_DIR } from './config.js';
 import { NewMessage, ScheduledTask, TaskRunLog } from './types.js';
@@ -28,6 +28,7 @@ export function initDatabase(): void {
       content TEXT,
       timestamp TEXT,
       is_from_me INTEGER,
+      mentions TEXT,
       PRIMARY KEY (id, chat_jid),
       FOREIGN KEY (chat_jid) REFERENCES chats(jid)
     );
@@ -74,6 +75,27 @@ export function initDatabase(): void {
     db.exec(
       `ALTER TABLE scheduled_tasks ADD COLUMN context_mode TEXT DEFAULT 'isolated'`,
     );
+  } catch {
+    /* column already exists */
+  }
+
+  // Add mentions column if it doesn't exist (migration for existing DBs)
+  try {
+    db.exec(`ALTER TABLE messages ADD COLUMN mentions TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Add media_type column if it doesn't exist (migration for existing DBs)
+  try {
+    db.exec(`ALTER TABLE messages ADD COLUMN media_type TEXT`);
+  } catch {
+    /* column already exists */
+  }
+
+  // Add media_path column if it doesn't exist (migration for existing DBs)
+  try {
+    db.exec(`ALTER TABLE messages ADD COLUMN media_path TEXT`);
   } catch {
     /* column already exists */
   }
@@ -175,15 +197,33 @@ export function storeMessage(
   chatJid: string,
   isFromMe: boolean,
   pushName?: string,
+  mediaType?: string,
+  mediaPath?: string,
 ): void {
   if (!msg.key) return;
 
+  // Unwrap documentWithCaptionMessage, viewOnceMessage, etc.
+  const m = normalizeMessageContent(msg.message) || msg.message;
+
   const content =
-    msg.message?.conversation ||
-    msg.message?.extendedTextMessage?.text ||
-    msg.message?.imageMessage?.caption ||
-    msg.message?.videoMessage?.caption ||
+    m?.conversation ||
+    m?.extendedTextMessage?.text ||
+    m?.imageMessage?.caption ||
+    m?.videoMessage?.caption ||
+    m?.documentMessage?.caption ||
     '';
+
+  // Extract mentions from the message (check all message types that can contain mentions)
+  const contextInfo =
+    m?.extendedTextMessage?.contextInfo ||
+    m?.imageMessage?.contextInfo ||
+    m?.videoMessage?.contextInfo ||
+    m?.documentMessage?.contextInfo ||
+    m?.listResponseMessage?.contextInfo ||
+    m?.buttonsResponseMessage?.contextInfo ||
+    (m as any)?.contextInfo;
+  const mentionedJids = contextInfo?.mentionedJid || [];
+  const mentions = mentionedJids.length > 0 ? JSON.stringify(mentionedJids) : null;
 
   const timestamp = new Date(Number(msg.messageTimestamp) * 1000).toISOString();
   const sender = msg.key.participant || msg.key.remoteJid || '';
@@ -191,7 +231,7 @@ export function storeMessage(
   const msgId = msg.key.id || '';
 
   db.prepare(
-    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO messages (id, chat_jid, sender, sender_name, content, timestamp, is_from_me, mentions, media_type, media_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     msgId,
     chatJid,
@@ -200,6 +240,9 @@ export function storeMessage(
     content,
     timestamp,
     isFromMe ? 1 : 0,
+    mentions,
+    mediaType || null,
+    mediaPath || null,
   );
 }
 
@@ -213,7 +256,7 @@ export function getNewMessages(
   const placeholders = jids.map(() => '?').join(',');
   // Filter out bot's own messages by checking content prefix (not is_from_me, since user shares the account)
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, mentions, media_type, media_path
     FROM messages
     WHERE timestamp > ? AND chat_jid IN (${placeholders}) AND content NOT LIKE ?
     ORDER BY timestamp
@@ -238,7 +281,7 @@ export function getMessagesSince(
 ): NewMessage[] {
   // Filter out bot's own messages by checking content prefix
   const sql = `
-    SELECT id, chat_jid, sender, sender_name, content, timestamp
+    SELECT id, chat_jid, sender, sender_name, content, timestamp, mentions, media_type, media_path
     FROM messages
     WHERE chat_jid = ? AND timestamp > ? AND content NOT LIKE ?
     ORDER BY timestamp

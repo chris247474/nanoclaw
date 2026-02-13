@@ -16,7 +16,120 @@ import {
 } from './config.js';
 import { logger } from './logger.js';
 import { validateAdditionalMounts } from './mount-security.js';
-import { RegisteredGroup } from './types.js';
+import {
+  ActiveContainer,
+  ContainerErrorSummary,
+  RecentContainerRun,
+  RegisteredGroup,
+  TeamConfig,
+} from './types.js';
+
+// --- Container Tracking ---
+
+const activeContainersMap = new Map<
+  string,
+  { pid: number; startTime: number; groupName: string; promptPreview: string }
+>();
+const recentRunsBuffer: RecentContainerRun[] = [];
+const recentErrorsBuffer: ContainerErrorSummary[] = [];
+const MAX_RECENT_RUNS = 20;
+const MAX_RECENT_ERRORS = 10;
+
+export function trackContainerStart(
+  groupFolder: string,
+  info: { pid: number; groupName: string; promptPreview: string },
+): void {
+  activeContainersMap.set(groupFolder, {
+    pid: info.pid,
+    startTime: Date.now(),
+    groupName: info.groupName,
+    promptPreview: info.promptPreview.slice(0, 100),
+  });
+}
+
+export function trackContainerEnd(
+  groupFolder: string,
+  result: { durationMs: number; status: 'success' | 'error' | 'timeout'; errorSummary?: string },
+): void {
+  const entry = activeContainersMap.get(groupFolder);
+  activeContainersMap.delete(groupFolder);
+
+  recentRunsBuffer.push({
+    groupFolder,
+    groupName: entry?.groupName || groupFolder,
+    startedAt: entry ? new Date(entry.startTime).toISOString() : new Date().toISOString(),
+    durationMs: result.durationMs,
+    status: result.status,
+    errorSummary: result.errorSummary?.slice(0, 200),
+  });
+  if (recentRunsBuffer.length > MAX_RECENT_RUNS) recentRunsBuffer.shift();
+}
+
+export function trackContainerError(
+  groupFolder: string,
+  result: { durationMs: number; error: string; type: ContainerErrorSummary['type'] },
+): void {
+  const entry = activeContainersMap.get(groupFolder);
+  activeContainersMap.delete(groupFolder);
+
+  recentRunsBuffer.push({
+    groupFolder,
+    groupName: entry?.groupName || groupFolder,
+    startedAt: entry ? new Date(entry.startTime).toISOString() : new Date().toISOString(),
+    durationMs: result.durationMs,
+    status: 'error',
+    errorSummary: result.error.slice(0, 200),
+  });
+  if (recentRunsBuffer.length > MAX_RECENT_RUNS) recentRunsBuffer.shift();
+
+  recentErrorsBuffer.push({
+    groupFolder,
+    timestamp: new Date().toISOString(),
+    error: result.error.slice(0, 200),
+    type: result.type,
+  });
+  if (recentErrorsBuffer.length > MAX_RECENT_ERRORS) recentErrorsBuffer.shift();
+}
+
+export function getActiveContainers(): ActiveContainer[] {
+  const now = Date.now();
+  return [...activeContainersMap.entries()].map(([folder, entry]) => ({
+    groupFolder: folder,
+    groupName: entry.groupName,
+    pid: entry.pid,
+    startedAt: new Date(entry.startTime).toISOString(),
+    elapsedMs: now - entry.startTime,
+    promptPreview: entry.promptPreview,
+  }));
+}
+
+export function getRecentRuns(): RecentContainerRun[] {
+  return [...recentRunsBuffer];
+}
+
+export function getRecentErrors(): ContainerErrorSummary[] {
+  return [...recentErrorsBuffer];
+}
+
+export function killContainer(groupFolder: string): boolean {
+  const entry = activeContainersMap.get(groupFolder);
+  if (!entry) return false;
+  try {
+    process.kill(entry.pid, 'SIGKILL');
+    activeContainersMap.delete(groupFolder);
+    logger.info({ groupFolder, pid: entry.pid }, 'Container killed via debug command');
+    return true;
+  } catch (err) {
+    logger.error({ groupFolder, pid: entry.pid, err }, 'Failed to kill container');
+    return false;
+  }
+}
+
+export function resetTracking(): void {
+  activeContainersMap.clear();
+  recentRunsBuffer.length = 0;
+  recentErrorsBuffer.length = 0;
+}
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -39,6 +152,79 @@ export interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  // Org mode fields
+  isAdmin?: boolean;
+  teamId?: string;
+  orgTeamIds?: string[];
+  teamEmail?: string;
+}
+
+export interface OrgMountContext {
+  teamConfig?: TeamConfig;
+  isAdmin?: boolean;
+  allTeams?: TeamConfig[];
+}
+
+/**
+ * Build volume mounts for org-mode credentials.
+ * - Team container: mount team's own credentials at standard paths
+ * - Admin container: mount ALL teams' credentials at namespaced paths
+ */
+export function getOrgVolumeMounts(ctx: OrgMountContext): VolumeMount[] {
+  const mounts: VolumeMount[] = [];
+
+  if (ctx.isAdmin && ctx.allTeams) {
+    // Admin: mount each team's credentials at namespaced paths
+    for (const team of ctx.allTeams) {
+      if (team.credentials.gmail) {
+        mounts.push({
+          hostPath: team.credentials.gmail,
+          containerPath: `/home/node/.gmail-mcp-${team.id}`,
+          readonly: false,
+        });
+      }
+      if (team.credentials.calendar) {
+        mounts.push({
+          hostPath: team.credentials.calendar,
+          containerPath: `/home/node/.config/google-calendar-mcp-${team.id}`,
+          readonly: false,
+        });
+      }
+      if (team.credentials.drive) {
+        mounts.push({
+          hostPath: team.credentials.drive,
+          containerPath: `/home/node/.config/google-drive-mcp-${team.id}`,
+          readonly: false,
+        });
+      }
+    }
+  } else if (ctx.teamConfig) {
+    // Team: mount own credentials at standard paths
+    const creds = ctx.teamConfig.credentials;
+    if (creds.gmail) {
+      mounts.push({
+        hostPath: creds.gmail,
+        containerPath: '/home/node/.gmail-mcp',
+        readonly: false,
+      });
+    }
+    if (creds.calendar) {
+      mounts.push({
+        hostPath: creds.calendar,
+        containerPath: '/home/node/.config/google-calendar-mcp',
+        readonly: false,
+      });
+    }
+    if (creds.drive) {
+      mounts.push({
+        hostPath: creds.drive,
+        containerPath: '/home/node/.config/google-drive-mcp',
+        readonly: false,
+      });
+    }
+  }
+
+  return mounts;
 }
 
 export interface ContainerOutput {
@@ -57,6 +243,7 @@ interface VolumeMount {
 function buildVolumeMounts(
   group: RegisteredGroup,
   isMain: boolean,
+  orgContext?: OrgMountContext,
 ): VolumeMount[] {
   const mounts: VolumeMount[] = [];
   const homeDir = getHomeDir();
@@ -96,6 +283,86 @@ function buildVolumeMounts(
     }
   }
 
+  // Google credentials mounting:
+  // - Org mode: use per-team or admin multi-mount from org config
+  // - DM users: mount per-user credentials from their group folder
+  // - Personal mode main: home-dir credentials (backward compatible)
+  if (orgContext && (orgContext.teamConfig || orgContext.isAdmin)) {
+    mounts.push(...getOrgVolumeMounts(orgContext));
+  } else {
+    // Per-group Google credentials (DMs and group chats alike)
+    const credsBase = path.join(GROUPS_DIR, group.folder, '.credentials');
+    let hasGroupGmail = false;
+    let hasGroupCalendar = false;
+    let hasGroupDrive = false;
+
+    const gmailCredsDir = path.join(credsBase, 'gmail-mcp');
+    if (fs.existsSync(gmailCredsDir)) {
+      mounts.push({
+        hostPath: gmailCredsDir,
+        containerPath: '/home/node/.gmail-mcp',
+        readonly: false,
+      });
+      hasGroupGmail = true;
+    }
+
+    const calendarCredsDir = path.join(credsBase, 'google-calendar-mcp');
+    if (fs.existsSync(calendarCredsDir)) {
+      mounts.push({
+        hostPath: calendarCredsDir,
+        containerPath: '/home/node/.config/google-calendar-mcp',
+        readonly: false,
+      });
+      hasGroupCalendar = true;
+    }
+
+    const driveCredsDir = path.join(credsBase, 'google-drive-mcp');
+    if (fs.existsSync(driveCredsDir)) {
+      mounts.push({
+        hostPath: driveCredsDir,
+        containerPath: '/home/node/.config/google-drive-mcp',
+        readonly: false,
+      });
+      hasGroupDrive = true;
+    }
+
+    // Main group: fall back to home-dir credentials for services without per-group creds
+    if (isMain) {
+      if (!hasGroupGmail) {
+        const gmailDir = path.join(homeDir, '.gmail-mcp');
+        if (fs.existsSync(gmailDir)) {
+          mounts.push({
+            hostPath: gmailDir,
+            containerPath: '/home/node/.gmail-mcp',
+            readonly: false,
+          });
+        }
+      }
+
+      if (!hasGroupCalendar) {
+        const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
+        if (fs.existsSync(calendarDir)) {
+          mounts.push({
+            hostPath: calendarDir,
+            containerPath: '/home/node/.config/google-calendar-mcp',
+            readonly: false,
+          });
+        }
+      }
+
+      if (!hasGroupDrive) {
+        const gdriveDir = path.join(homeDir, '.config', 'google-drive-mcp');
+        if (fs.existsSync(gdriveDir)) {
+          mounts.push({
+            hostPath: gdriveDir,
+            containerPath: '/home/node/.config/google-drive-mcp',
+            readonly: false,
+          });
+        }
+      }
+    }
+  }
+
   // Per-group Claude sessions directory (isolated from other groups)
   // Each group gets their own .claude/ to prevent cross-group session access
   const groupSessionsDir = path.join(
@@ -124,17 +391,38 @@ function buildVolumeMounts(
 
   // Environment file directory (workaround for Apple Container -i env var bug)
   // Only expose specific auth variables needed by Claude Code, not the entire .env
-  const envDir = path.join(DATA_DIR, 'env');
+  // Per-group env dirs allow model overrides (admin groups get Opus, others get Sonnet)
+  const envDir = path.join(DATA_DIR, 'env', group.folder);
   fs.mkdirSync(envDir, { recursive: true });
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
+    const allowedVars = [
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'ANTHROPIC_API_KEY',
+      'CLAUDE_MODEL',
+      'CLAUDE_FALLBACK_MODEL',
+      'OPENAI_API_KEY',
+      'OPENAI_MODEL',
+      'OPENAI_BASE_URL',
+      'FIGMA_ACCESS_TOKEN',
+    ];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return false;
       return allowedVars.some((v) => trimmed.startsWith(`${v}=`));
     });
+
+    // Non-admin groups: override model to Haiku 4.5 (with extended thinking) and remove fallback
+    // (fallback can't be the same as the main model — SDK rejects it)
+    if (!isMain) {
+      const nonAdminModel = process.env.CLAUDE_FALLBACK_MODEL || 'claude-haiku-4-5-20251001';
+      const overriddenLines = filteredLines
+        .filter((line) => !line.trim().startsWith('CLAUDE_MODEL=') && !line.trim().startsWith('CLAUDE_FALLBACK_MODEL='))
+        .concat(`CLAUDE_MODEL=${nonAdminModel}`);
+      filteredLines.length = 0;
+      filteredLines.push(...overriddenLines);
+    }
 
     if (filteredLines.length > 0) {
       fs.writeFileSync(
@@ -163,7 +451,7 @@ function buildVolumeMounts(
 }
 
 function buildContainerArgs(mounts: VolumeMount[]): string[] {
-  const args: string[] = ['run', '-i', '--rm'];
+  const args: string[] = ['run', '-i', '--rm', '-m', '4G'];
 
   // Apple Container: --mount for readonly, -v for read-write
   for (const mount of mounts) {
@@ -185,13 +473,14 @@ function buildContainerArgs(mounts: VolumeMount[]): string[] {
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
+  orgContext?: OrgMountContext,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
   const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
+  const mounts = buildVolumeMounts(group, input.isMain, orgContext);
   const containerArgs = buildContainerArgs(mounts);
 
   logger.debug(
@@ -222,6 +511,15 @@ export async function runContainerAgent(
     const container = spawn('container', containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+
+    // Track active container for diagnostics
+    if (container.pid) {
+      trackContainerStart(group.folder, {
+        pid: container.pid,
+        groupName: group.name,
+        promptPreview: input.prompt.slice(0, 100),
+      });
+    }
 
     let stdout = '';
     let stderr = '';
@@ -270,6 +568,11 @@ export async function runContainerAgent(
     const timeout = setTimeout(() => {
       logger.error({ group: group.name }, 'Container timeout, killing');
       container.kill('SIGKILL');
+      trackContainerError(group.folder, {
+        durationMs: Date.now() - startTime,
+        error: `Container timed out after ${CONTAINER_TIMEOUT}ms`,
+        type: 'timeout',
+      });
       resolve({
         status: 'error',
         result: null,
@@ -357,6 +660,12 @@ export async function runContainerAgent(
           'Container exited with error',
         );
 
+        trackContainerError(group.folder, {
+          durationMs: duration,
+          error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
+          type: 'exit_code',
+        });
+
         resolve({
           status: 'error',
           result: null,
@@ -393,6 +702,12 @@ export async function runContainerAgent(
           'Container completed',
         );
 
+        trackContainerEnd(group.folder, {
+          durationMs: duration,
+          status: output.status === 'error' ? 'error' : 'success',
+          errorSummary: output.error,
+        });
+
         resolve(output);
       } catch (err) {
         logger.error(
@@ -403,6 +718,12 @@ export async function runContainerAgent(
           },
           'Failed to parse container output',
         );
+
+        trackContainerError(group.folder, {
+          durationMs: duration,
+          error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
+          type: 'parse_error',
+        });
 
         resolve({
           status: 'error',
@@ -415,6 +736,11 @@ export async function runContainerAgent(
     container.on('error', (err) => {
       clearTimeout(timeout);
       logger.error({ group: group.name, error: err }, 'Container spawn error');
+      trackContainerError(group.folder, {
+        durationMs: Date.now() - startTime,
+        error: `Container spawn error: ${err.message}`,
+        type: 'spawn_error',
+      });
       resolve({
         status: 'error',
         result: null,
@@ -448,6 +774,58 @@ export function writeTasksSnapshot(
 
   const tasksFile = path.join(groupIpcDir, 'current_tasks.json');
   fs.writeFileSync(tasksFile, JSON.stringify(filteredTasks, null, 2));
+}
+
+/**
+ * Write org context JSON for the container agent to read.
+ * Admin sees all teams and capabilities; team sees only its own info.
+ */
+export function writeOrgContext(
+  groupFolder: string,
+  orgContext: {
+    orgName: string;
+    isAdmin: boolean;
+    teamId?: string;
+    teamName?: string;
+    teamEmail?: string;
+    allTeams?: Array<{ id: string; name: string; email?: string }>;
+  },
+): void {
+  const groupIpcDir = path.join(DATA_DIR, 'ipc', groupFolder);
+  fs.mkdirSync(groupIpcDir, { recursive: true });
+
+  let context: Record<string, unknown>;
+
+  if (orgContext.isAdmin) {
+    context = {
+      organization: orgContext.orgName,
+      role: 'admin',
+      teams: orgContext.allTeams || [],
+      capabilities: [
+        'Read/send email as any team (use mcp__gmail-{teamId}__* tools)',
+        'Search Drive across all teams (use mcp__gdrive-{teamId}__* tools)',
+        'Manage calendars for all teams (use mcp__google-calendar-{teamId}__* tools)',
+      ],
+    };
+  } else {
+    context = {
+      organization: orgContext.orgName,
+      role: 'team',
+      team: {
+        id: orgContext.teamId,
+        name: orgContext.teamName,
+        email: orgContext.teamEmail,
+      },
+      capabilities: [
+        `Read/send email for ${orgContext.teamEmail || 'this team'} (use mcp__gmail__* tools)`,
+        'Access team Drive folders (use mcp__gdrive__* tools)',
+        'Manage team calendar (use mcp__google-calendar__* tools)',
+      ],
+    };
+  }
+
+  const contextFile = path.join(groupIpcDir, 'org_context.json');
+  fs.writeFileSync(contextFile, JSON.stringify(context, null, 2));
 }
 
 export interface AvailableGroup {

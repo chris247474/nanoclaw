@@ -12,6 +12,30 @@ logs/
 # Secrets
 *.keys.json
 .env
+.credentials/
+
+# Group user data (media, conversations, agent-generated files)
+# Only CLAUDE.md should be tracked per group
+groups/*/files/
+groups/*/conversations/
+groups/*/logs/
+groups/*/planning/
+groups/*/*.pdf
+groups/*/*.html
+groups/*/*.rtf
+groups/*/*.txt
+groups/*/*.docx
+groups/*/*.bin
+groups/*/*.js
+groups/*/*.py
+groups/*/*.md
+!groups/*/CLAUDE.md
+
+# Agent-generated project directories inside groups
+groups/*/perps-grid-bot/
+
+# Planning docs (may contain PII or internal strategy)
+planning/
 
 # OS
 .DS_Store
@@ -20,4 +44,5 @@ logs/
 .idea/
 .vscode/
 
+# SDK docs (local reference)
 agents-sdk-docs

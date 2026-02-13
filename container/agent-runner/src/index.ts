@@ -15,6 +15,11 @@ interface ContainerInput {
   chatJid: string;
   isMain: boolean;
   isScheduledTask?: boolean;
+  // Org mode fields
+  isAdmin?: boolean;
+  teamId?: string;
+  orgTeamIds?: string[];
+  teamEmail?: string;
 }
 
 interface ContainerOutput {
@@ -225,46 +230,227 @@ async function main(): Promise<void> {
   let result: string | null = null;
   let newSessionId: string | undefined;
 
-  // Add context for scheduled tasks
-  let prompt = input.prompt;
-  if (input.isScheduledTask) {
-    prompt = `[SCHEDULED TASK - You are running automatically, not in response to a user message. Use mcp__nanoclaw__send_message if needed to communicate with the user.]\n\n${input.prompt}`;
+  // Read org context if available (written by host before container launch)
+  const orgContextPath = '/workspace/ipc/org_context.json';
+  let orgContextPrompt = '';
+  if (fs.existsSync(orgContextPath)) {
+    try {
+      const orgContext = JSON.parse(fs.readFileSync(orgContextPath, 'utf-8'));
+      orgContextPrompt = `[ORGANIZATION CONTEXT]\n${JSON.stringify(orgContext, null, 2)}\n[/ORGANIZATION CONTEXT]\n\n`;
+      log(`Loaded org context: role=${orgContext.role}, org=${orgContext.organization}`);
+    } catch (err) {
+      log(`Failed to read org context: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
-  try {
-    log('Starting agent...');
+  // Add progress update instructions for all tasks
+  // IMPORTANT: When send_message is used, the final return value is suppressed to avoid duplicates.
+  // So if you send progress updates, your final answer MUST also go through send_message.
+  let prompt = `[RESPONSE RULES:
+- For simple questions (quick lookups, short answers, confirmations): just return your answer directly. Do NOT use mcp__nanoclaw__send_message.
+- For tasks taking >30 seconds (research, multi-step operations, file processing): use mcp__nanoclaw__send_message for ALL responses including your final answer. Your return value will be suppressed if any send_message was used.
+- Rule: either use send_message for everything OR don't use it at all. Never mix both.]\n\n${orgContextPrompt}${input.prompt}`;
 
-    for await (const message of query({
-      prompt,
-      options: {
-        cwd: '/workspace/group',
-        resume: input.sessionId,
-        allowedTools: [
-          'Bash',
-          'Read', 'Write', 'Edit', 'Glob', 'Grep',
-          'WebSearch', 'WebFetch',
-          'mcp__nanoclaw__*'
-        ],
-        permissionMode: 'bypassPermissions',
-        allowDangerouslySkipPermissions: true,
-        settingSources: ['project'],
-        mcpServers: {
-          nanoclaw: ipcMcp
-        },
-        hooks: {
-          PreCompact: [{ hooks: [createPreCompactHook()] }]
+  // Add context for scheduled tasks
+  if (input.isScheduledTask) {
+    prompt = `[SCHEDULED TASK - You are running automatically, not in response to a user message. Use mcp__nanoclaw__send_message if needed to communicate with the user.]\n\n${prompt}`;
+  }
+
+  // Save original env vars for fallback
+  const origApiKey = process.env.ANTHROPIC_API_KEY;
+  const origBaseUrl = process.env.ANTHROPIC_BASE_URL;
+  const origModel = process.env.ANTHROPIC_MODEL;
+  const origOAuthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+
+  function setThirdPartyEnv() {
+    // Route the Claude Agent SDK to the 3rd party provider
+    // by overriding ANTHROPIC_* env vars
+    process.env.ANTHROPIC_API_KEY = process.env.OPENAI_API_KEY;
+    process.env.ANTHROPIC_BASE_URL = process.env.OPENAI_BASE_URL;
+    process.env.ANTHROPIC_MODEL = process.env.OPENAI_MODEL;
+    // Clear OAuth token so it doesn't conflict
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  }
+
+  function restoreClaudeEnv() {
+    // Restore original env vars for Claude fallback
+    if (origApiKey) {
+      process.env.ANTHROPIC_API_KEY = origApiKey;
+    } else {
+      delete process.env.ANTHROPIC_API_KEY;
+    }
+    if (origBaseUrl) {
+      process.env.ANTHROPIC_BASE_URL = origBaseUrl;
+    } else {
+      delete process.env.ANTHROPIC_BASE_URL;
+    }
+    if (origModel) {
+      process.env.ANTHROPIC_MODEL = origModel;
+    } else {
+      delete process.env.ANTHROPIC_MODEL;
+    }
+    if (origOAuthToken) {
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = origOAuthToken;
+    }
+  }
+
+  function buildQueryOptions(modelConfig: any = {}) {
+    const mcpServers: any = {
+      nanoclaw: ipcMcp
+    };
+
+    // Google MCP loading:
+    // - Admin (org mode): load per-team MCP instances at namespaced paths
+    // - Team/Main (org or personal): load MCP if credentials exist at standard paths
+    //   (host only mounts credentials if the team/main has them configured)
+    if (input.isAdmin && input.orgTeamIds) {
+      // Admin: discover and load per-team MCP instances
+      for (const teamId of input.orgTeamIds) {
+        const teamGmailCreds = `/home/node/.gmail-mcp-${teamId}/credentials.json`;
+        if (fs.existsSync(teamGmailCreds)) {
+          mcpServers[`gmail-${teamId}`] = {
+            command: 'npx',
+            args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+            env: {
+              GMAIL_MCP_CREDENTIALS_DIR: `/home/node/.gmail-mcp-${teamId}`
+            }
+          };
+        }
+
+        const teamCalendarTokens = `/home/node/.config/google-calendar-mcp-${teamId}/tokens.json`;
+        if (fs.existsSync(teamCalendarTokens)) {
+          const teamOAuthKeys = `/home/node/.gmail-mcp-${teamId}/gcp-oauth.keys.json`;
+          mcpServers[`google-calendar-${teamId}`] = {
+            command: 'npx',
+            args: ['-y', '@cocal/google-calendar-mcp'],
+            env: {
+              GOOGLE_OAUTH_CREDENTIALS: teamOAuthKeys,
+              GOOGLE_CALENDAR_MCP_TOKEN_PATH: teamCalendarTokens
+            }
+          };
+        }
+
+        const teamDriveTokens = `/home/node/.config/google-drive-mcp-${teamId}/tokens.json`;
+        if (fs.existsSync(teamDriveTokens)) {
+          const teamOAuthKeys = `/home/node/.gmail-mcp-${teamId}/gcp-oauth.keys.json`;
+          mcpServers[`gdrive-${teamId}`] = {
+            command: 'npx',
+            args: ['-y', '@piotr-agier/google-drive-mcp'],
+            env: {
+              GOOGLE_DRIVE_OAUTH_CREDENTIALS: teamOAuthKeys,
+              GOOGLE_DRIVE_MCP_TOKEN_PATH: teamDriveTokens
+            }
+          };
         }
       }
-    })) {
+    } else {
+      // Team or Main (personal mode): load MCP if credentials exist at standard paths
+      const gmailCredsPath = '/home/node/.gmail-mcp/credentials.json';
+      if (fs.existsSync(gmailCredsPath)) {
+        mcpServers['gmail'] = {
+          command: 'npx',
+          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp']
+        };
+      }
+
+      const calendarTokensPath = '/home/node/.config/google-calendar-mcp/tokens.json';
+      if (fs.existsSync(calendarTokensPath)) {
+        mcpServers['google-calendar'] = {
+          command: 'npx',
+          args: ['-y', '@cocal/google-calendar-mcp'],
+          env: {
+            GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+            GOOGLE_CALENDAR_MCP_TOKEN_PATH: calendarTokensPath
+          }
+        };
+      }
+
+      const gdriveTokensPath = '/home/node/.config/google-drive-mcp/tokens.json';
+      if (fs.existsSync(gdriveTokensPath)) {
+        mcpServers['gdrive'] = {
+          command: 'npx',
+          args: ['-y', '@piotr-agier/google-drive-mcp'],
+          env: {
+            GOOGLE_DRIVE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+            GOOGLE_DRIVE_MCP_TOKEN_PATH: gdriveTokensPath
+          }
+        };
+      }
+    }
+
+    // Add Figma MCP if token exists (available to all groups)
+    if (process.env.FIGMA_ACCESS_TOKEN) {
+      mcpServers['figma'] = {
+        command: 'figma-developer-mcp',
+        env: {
+          FIGMA_ACCESS_TOKEN: process.env.FIGMA_ACCESS_TOKEN
+        }
+      };
+    }
+
+    return {
+      ...modelConfig,
+      cwd: '/workspace/group',
+      resume: input.sessionId,
+      allowedTools: [
+        'Bash',
+        'Read', 'Write', 'Edit', 'Glob', 'Grep',
+        'WebSearch', 'WebFetch',
+        'mcp__nanoclaw__*',
+        'mcp__gmail__*',
+        'mcp__gmail-*__*',
+        'mcp__google-calendar__*',
+        'mcp__google-calendar-*__*',
+        'mcp__gdrive__*',
+        'mcp__gdrive-*__*',
+        'mcp__figma__*'
+      ],
+      permissionMode: 'bypassPermissions' as const,
+      allowDangerouslySkipPermissions: true,
+      settingSources: ['project'] as const,
+      mcpServers,
+      hooks: {
+        PreCompact: [{ hooks: [createPreCompactHook()] }]
+      }
+    };
+  }
+
+  async function runAgent(options: any) {
+    for await (const message of query({ prompt, options })) {
       if (message.type === 'system' && message.subtype === 'init') {
         newSessionId = message.session_id;
         log(`Session initialized: ${newSessionId}`);
       }
-
       if ('result' in message && message.result) {
         result = message.result as string;
       }
     }
+  }
+
+  const useThirdParty = !!(process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL && process.env.OPENAI_MODEL);
+
+  try {
+    log('Starting agent...');
+
+    if (useThirdParty) {
+      log(`Using 3rd party model: ${process.env.OPENAI_MODEL} via ${process.env.OPENAI_BASE_URL}`);
+      setThirdPartyEnv();
+    } else if (process.env.CLAUDE_MODEL) {
+      log(`Using Claude model: ${process.env.CLAUDE_MODEL}`);
+    }
+
+    const modelConfig: any = {};
+    if (!useThirdParty && process.env.CLAUDE_MODEL) {
+      modelConfig.model = process.env.CLAUDE_MODEL;
+      if (process.env.CLAUDE_FALLBACK_MODEL) {
+        modelConfig.fallbackModel = process.env.CLAUDE_FALLBACK_MODEL;
+      }
+    }
+
+    await runAgent(buildQueryOptions(modelConfig));
+
+    // Restore env after success
+    if (useThirdParty) restoreClaudeEnv();
 
     log('Agent completed successfully');
     writeOutput({
@@ -275,6 +461,44 @@ async function main(): Promise<void> {
 
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
+
+    // If 3rd party failed and Claude fallback is available, try Claude
+    if (useThirdParty && (origOAuthToken || origApiKey)) {
+      log(`Primary model failed: ${errorMessage}`);
+      log('Attempting fallback to Claude...');
+      restoreClaudeEnv();
+
+      try {
+        const claudeConfig: any = {};
+        if (process.env.CLAUDE_MODEL) {
+          claudeConfig.model = process.env.CLAUDE_MODEL;
+        }
+        if (process.env.CLAUDE_FALLBACK_MODEL) {
+          claudeConfig.fallbackModel = process.env.CLAUDE_FALLBACK_MODEL;
+        }
+
+        await runAgent(buildQueryOptions(claudeConfig));
+
+        log('Agent completed successfully with Claude fallback');
+        writeOutput({
+          status: 'success',
+          result,
+          newSessionId
+        });
+        return;
+      } catch (fallbackErr) {
+        const fallbackMessage = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        log(`Claude fallback also failed: ${fallbackMessage}`);
+        writeOutput({
+          status: 'error',
+          result: null,
+          newSessionId,
+          error: `Primary failed: ${errorMessage}. Fallback failed: ${fallbackMessage}`
+        });
+        process.exit(1);
+      }
+    }
+
     log(`Agent error: ${errorMessage}`);
     writeOutput({
       status: 'error',

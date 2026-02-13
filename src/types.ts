@@ -38,7 +38,19 @@ export interface RegisteredGroup {
   folder: string;
   trigger: string;
   added_at: string;
+  isMain?: boolean;
+  alwaysProcess?: boolean; // Process every message without trigger (e.g., DM users)
+  isDm?: boolean; // DM registration — per-user credential mounts, no admin privileges
+  lidJid?: string; // LID JID for DM contacts (e.g., "223952496496782@lid")
   containerConfig?: ContainerConfig;
+}
+
+export interface PendingDmRequest {
+  jid: string; // Phone JID (e.g., "15551234567@s.whatsapp.net")
+  senderName?: string; // Push name from WhatsApp
+  requestedAt: string; // ISO timestamp
+  triggerMessage: string; // The message that triggered the request
+  phone: string; // Phone number part of JID (for folder naming)
 }
 
 export interface Session {
@@ -51,6 +63,19 @@ export interface NewMessage {
   sender: string;
   sender_name: string;
   content: string;
+  timestamp: string;
+  mentions?: string | null;
+  media_type?: string | null;
+  media_path?: string | null;
+}
+
+export interface IpcFileMessage {
+  type: 'file';
+  chatJid: string;
+  filePath: string;       // Relative path within group dir (e.g., "reports/output.pdf")
+  caption?: string;
+  fileName?: string;      // Override display name
+  groupFolder: string;
   timestamp: string;
 }
 
@@ -76,4 +101,86 @@ export interface TaskRunLog {
   status: 'success' | 'error';
   result: string | null;
   error: string | null;
+}
+
+// --- Diagnostics types ---
+
+export interface ActiveContainer {
+  groupFolder: string;
+  groupName: string;
+  pid: number;
+  startedAt: string;
+  elapsedMs: number;
+  promptPreview: string;
+}
+
+export interface RecentContainerRun {
+  groupFolder: string;
+  groupName: string;
+  startedAt: string;
+  durationMs: number;
+  status: 'success' | 'error' | 'timeout';
+  errorSummary?: string;
+}
+
+export interface ContainerErrorSummary {
+  groupFolder: string;
+  timestamp: string;
+  error: string;
+  type: 'exit_code' | 'timeout' | 'spawn_error' | 'parse_error';
+}
+
+export interface DiagnosticsSnapshot {
+  timestamp: string;
+  process: {
+    uptime_ms: number;
+    memory_mb: number;
+    node_version: string;
+    pid: number;
+    started_at: string;
+  };
+  containers: {
+    active: ActiveContainer[];
+    recent: RecentContainerRun[];
+  };
+  messaging: {
+    last_message_processed: string | null;
+    registered_groups_count: number;
+    whatsapp_connected: boolean;
+  };
+  errors: {
+    recent_container_errors: ContainerErrorSummary[];
+    last_error_at: string | null;
+  };
+}
+
+// --- Multi-team / Org mode types ---
+
+export interface OrgConfig {
+  organization: { id: string; name: string };
+  admin: {
+    whatsapp_jid?: string;
+    whatsapp_group_name?: string;
+    model?: string;
+  };
+  teams: TeamConfig[];
+}
+
+export interface TeamConfig {
+  id: string;
+  name: string;
+  whatsapp_jid?: string;
+  whatsapp_group_name?: string;
+  email?: string;
+  credentials: {
+    gmail?: string;
+    calendar?: string;
+    drive?: string;
+  };
+  drive_folders?: Array<{
+    id: string;
+    name: string;
+    access: 'read-write' | 'read-only';
+  }>;
+  model?: string;
 }
