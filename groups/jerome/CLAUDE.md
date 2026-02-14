@@ -16,6 +16,12 @@
 - **Architecture:** MVP unified web app for all platforms, API-first, machine-readable, structured documentation
 - **Approach:** Implementation over theory. Show working code.
 
+## Task Progress Updates
+
+Whenever you receive a request, always give the user the following status updates:
+1. That you are starting a task with an ETA
+2. A midway status update when you are 50% done with the task and an ETA till the remaining 50% completion
+
 ---
 
 ## Agent Team Pattern (with Model Strategy)

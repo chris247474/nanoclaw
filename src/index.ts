@@ -59,7 +59,6 @@ import { createOAuthSession, startOAuthServer, type OAuthService } from './oauth
 const GROUP_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 let sock: WASocket;
-let lastTimestamp = '';
 let sessions: Session = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
@@ -67,15 +66,17 @@ let orgConfig: OrgConfig | null = null;
 // LID to phone number mapping (WhatsApp now sends LID JIDs for self-chats)
 let lidToPhoneMap: Record<string, string> = {};
 // Guards to prevent duplicate loops on WhatsApp reconnect
-let messageLoopRunning = false;
+let loopsStarted = false;
 let ipcWatcherRunning = false;
 // Track IPC messages sent per chat to suppress duplicate final result
 let ipcMessagesSent: Record<string, number> = {};
 let groupSyncTimerStarted = false;
-// Per-admin loop timestamps (independent of global lastTimestamp)
-let adminTimestamps: Record<string, string> = {};
-// Track which admin loops are already running to prevent duplicates
-const adminLoopsRunning = new Set<string>();
+// Per-group timestamps for independent message processing loops
+let groupTimestamps: Record<string, string> = {};
+// Timestamp for discovery loop (unregistered chats)
+let discoveryTimestamp = '';
+// Track which group loops are already running to prevent duplicates
+const groupLoopsRunning = new Set<string>();
 
 /**
  * Translate a JID from LID format to phone format if we have a mapping.
@@ -106,10 +107,22 @@ function loadState(): void {
     last_timestamp?: string;
     last_agent_timestamp?: Record<string, string>;
     admin_timestamps?: Record<string, string>;
+    group_timestamps?: Record<string, string>;
+    discovery_timestamp?: string;
   }>(statePath, {});
-  lastTimestamp = state.last_timestamp || '';
+  groupTimestamps = state.group_timestamps || {};
+  discoveryTimestamp = state.discovery_timestamp || '';
   lastAgentTimestamp = state.last_agent_timestamp || {};
-  adminTimestamps = state.admin_timestamps || {};
+
+  // One-time migration from old format (last_timestamp + admin_timestamps)
+  if (!state.group_timestamps) {
+    if (state.admin_timestamps) Object.assign(groupTimestamps, state.admin_timestamps);
+    const fallback = state.last_timestamp || '';
+    if (fallback) {
+      discoveryTimestamp = fallback;
+    }
+  }
+
   sessions = loadJson(path.join(DATA_DIR, 'sessions.json'), {});
   registeredGroups = loadJson(
     path.join(DATA_DIR, 'registered_groups.json'),
@@ -132,11 +145,16 @@ function loadState(): void {
 
 function saveState(): void {
   saveJson(path.join(DATA_DIR, 'router_state.json'), {
-    last_timestamp: lastTimestamp,
+    group_timestamps: groupTimestamps,
+    discovery_timestamp: discoveryTimestamp,
     last_agent_timestamp: lastAgentTimestamp,
-    admin_timestamps: adminTimestamps,
   });
   saveJson(path.join(DATA_DIR, 'sessions.json'), sessions);
+}
+
+function getLatestTimestamp(): string | null {
+  const all = Object.values(groupTimestamps);
+  return all.length ? all.reduce((a, b) => (a > b ? a : b)) : null;
 }
 
 function registerGroup(jid: string, group: RegisteredGroup): void {
@@ -158,7 +176,7 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     if (!fs.existsSync(claudeMdPath)) {
       fs.writeFileSync(
         claudeMdPath,
-        `# DM User - ${group.name}\n\nYou are ${ASSISTANT_NAME}, a personal assistant for this user.\n\n## Capabilities\n\n- Gmail access (read, search, send, draft emails via MCP)\n- Google Calendar access (view, create, update, delete events via MCP)\n- Google Drive access (search, read files, read/write Sheets via MCP)\n- Web search and information lookup\n- File operations within your workspace\n- Schedule recurring tasks\n\n## Setup Required\n\nThis is a new DM registration. The user may need to set up Google integrations.\nCredentials are stored in /workspace/group/.credentials/\n\n## Guidelines\n\n- Be helpful and proactive\n- Provide clear, actionable responses\n- Use WhatsApp-friendly formatting\n- Your data is isolated from other users\n`,
+        `# DM User - ${group.name}\n\nYou are ${ASSISTANT_NAME}, a personal assistant for this user.\n\n## Capabilities\n\n- Gmail access (read, search, send, draft emails via MCP)\n- Google Calendar access (view, create, update, delete events via MCP)\n- Google Drive access (search, read files, read/write Sheets via MCP)\n- Web search and information lookup\n- File operations within your workspace\n- Schedule recurring tasks\n\n## Setup Required\n\nThis is a new DM registration. The user may need to set up Google integrations.\nCredentials are stored in /workspace/group/.credentials/\n\n## Guidelines\n\n- Be helpful and proactive\n- Provide clear, actionable responses\n- Use WhatsApp-friendly formatting\n- Your data is isolated from other users\n\n## Task Progress Updates\n\nWhenever you receive a request, always give the user the following status updates:\n1. That you are starting a task with an ETA\n2. A midway status update when you are 50% done with the task and an ETA till the remaining 50% completion\n`,
       );
     }
   }
@@ -517,7 +535,7 @@ async function runAgent(
   // Write diagnostics snapshot for admin channels
   if (isMain || isAdmin) {
     writeDiagnosticsSnapshot(group.folder, {
-      lastMessageProcessed: lastTimestamp || null,
+      lastMessageProcessed: getLatestTimestamp(),
       registeredGroupsCount: Object.keys(registeredGroups).length,
       whatsappConnected: !!sock?.user,
     }, DATA_DIR);
@@ -1051,7 +1069,7 @@ async function processTaskIpc(
     case 'refresh_diagnostics':
       if (isMain) {
         writeDiagnosticsSnapshot(sourceGroup, {
-          lastMessageProcessed: lastTimestamp || null,
+          lastMessageProcessed: getLatestTimestamp(),
           registeredGroupsCount: Object.keys(registeredGroups).length,
           whatsappConnected: !!sock?.user,
         }, DATA_DIR);
@@ -1181,7 +1199,7 @@ async function connectWhatsApp(): Promise<void> {
           );
         }
       });
-      startMessageLoop();
+      startAllLoops();
 
       // Periodic cleanup of old incoming media files
       setInterval(() => {
@@ -1266,120 +1284,124 @@ async function connectWhatsApp(): Promise<void> {
   });
 }
 
-async function startMessageLoop(): Promise<void> {
-  if (messageLoopRunning) {
-    logger.debug('Message loop already running, skipping duplicate start');
-    return;
-  }
-  messageLoopRunning = true;
-  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
-
-  // Launch independent loops for admin channels so they're never blocked
-  // by a stuck container in a non-admin group
-  const adminJids = new Set<string>();
-  for (const [jid, group] of Object.entries(registeredGroups)) {
-    if (group.isMain || group.folder === MAIN_GROUP_FOLDER) {
-      adminJids.add(jid);
-      startAdminLoop(jid);
-    }
-  }
-
-  while (true) {
-    try {
-      // Include registered groups + all known group chats (for auto-registration)
-      // + pending DM requests (so their trigger messages get picked up)
-      const registeredJids = new Set(Object.keys(registeredGroups));
-      const allChats = getAllChats();
-      for (const chat of allChats) {
-        // Include group chats (for auto-registration) and DM chats (for pending registration)
-        if (chat.jid.endsWith('@g.us') || chat.jid.endsWith('@s.whatsapp.net') || chat.jid.endsWith('@lid')) {
-          registeredJids.add(chat.jid);
-        }
-      }
-      for (const req of loadPendingRequests()) {
-        registeredJids.add(req.jid);
-      }
-
-      // Check for newly-registered admin channels and start their loops
-      for (const [jid, group] of Object.entries(registeredGroups)) {
-        if ((group.isMain || group.folder === MAIN_GROUP_FOLDER) && !adminJids.has(jid)) {
-          adminJids.add(jid);
-          startAdminLoop(jid);
-        }
-      }
-
-      // Exclude admin JIDs — they have their own independent loops
-      const jids = [...registeredJids].filter((jid) => !adminJids.has(jid));
-      const { messages } = getNewMessages(jids, lastTimestamp, ASSISTANT_NAME);
-
-      if (messages.length > 0)
-        logger.info({ count: messages.length }, 'New messages');
-      for (const msg of messages) {
-        try {
-          await processMessage(msg);
-          // Only advance timestamp after successful processing for at-least-once delivery
-          lastTimestamp = msg.timestamp;
-          saveState();
-        } catch (err) {
-          logger.error(
-            { err, msg: msg.id },
-            'Error processing message, will retry',
-          );
-          // Stop processing this batch - failed message will be retried next loop
-          break;
-        }
-      }
-    } catch (err) {
-      logger.error({ err }, 'Error in message loop');
-    }
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-  }
-}
-
 /**
- * Independent processing loop for a single admin channel.
- * Runs concurrently with the main loop via JS async interleaving —
- * while the main loop awaits a stuck container, this loop keeps processing.
+ * Independent processing loop for a single registered group.
+ * Each group gets its own loop so a stuck container in one group
+ * never blocks message processing in other groups.
  */
-async function startAdminLoop(adminJid: string): Promise<void> {
-  if (adminLoopsRunning.has(adminJid)) return;
-  adminLoopsRunning.add(adminJid);
+async function startGroupLoop(jid: string): Promise<void> {
+  if (groupLoopsRunning.has(jid)) return;
+  groupLoopsRunning.add(jid);
 
-  const group = registeredGroups[adminJid];
-  const label = group?.folder || adminJid;
-  logger.info({ jid: adminJid, folder: label }, 'Starting independent admin loop');
+  const group = registeredGroups[jid];
+  const label = group?.folder || jid;
+  logger.info({ jid, folder: label }, 'Starting independent group loop');
 
-  // Use per-admin timestamp, falling back to global
-  if (!adminTimestamps[adminJid]) {
-    adminTimestamps[adminJid] = lastTimestamp;
+  if (!groupTimestamps[jid]) {
+    groupTimestamps[jid] = discoveryTimestamp || '';
   }
 
   while (true) {
     try {
       const { messages } = getNewMessages(
-        [adminJid],
-        adminTimestamps[adminJid],
+        [jid],
+        groupTimestamps[jid],
         ASSISTANT_NAME,
       );
 
       for (const msg of messages) {
         try {
           await processMessage(msg);
-          adminTimestamps[adminJid] = msg.timestamp;
+          groupTimestamps[jid] = msg.timestamp;
           saveState();
         } catch (err) {
           logger.error(
-            { err, msg: msg.id, adminJid },
-            'Error in admin loop, will retry',
+            { err, msg: msg.id, jid },
+            'Error in group loop, will retry',
           );
           break;
         }
       }
     } catch (err) {
-      logger.error({ err, adminJid }, 'Error in admin loop');
+      logger.error({ err, jid }, 'Error in group loop');
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
   }
+}
+
+/**
+ * Lightweight discovery loop for unregistered chats.
+ * Monitors all group chats and DMs for auto-registration triggers
+ * and DM registration requests. Does NOT run containers — only handles
+ * registration logic. Once a group is registered, startGroupLoop takes over.
+ */
+async function startDiscoveryLoop(): Promise<void> {
+  while (true) {
+    try {
+      // Check for newly registered groups and start their loops
+      for (const jid of Object.keys(registeredGroups)) {
+        if (!groupLoopsRunning.has(jid)) {
+          startGroupLoop(jid);
+        }
+      }
+
+      // Collect unregistered JIDs for auto-registration + DM pending
+      const handledJids = new Set(Object.keys(registeredGroups));
+      const discoveryJids: string[] = [];
+      const allChats = getAllChats();
+      for (const chat of allChats) {
+        if (!handledJids.has(chat.jid) &&
+            (chat.jid.endsWith('@g.us') || chat.jid.endsWith('@s.whatsapp.net') || chat.jid.endsWith('@lid'))) {
+          discoveryJids.push(chat.jid);
+        }
+      }
+      for (const req of loadPendingRequests()) {
+        if (!handledJids.has(req.jid) && !discoveryJids.includes(req.jid)) {
+          discoveryJids.push(req.jid);
+        }
+      }
+
+      if (discoveryJids.length > 0) {
+        const { messages } = getNewMessages(discoveryJids, discoveryTimestamp, ASSISTANT_NAME);
+
+        if (messages.length > 0)
+          logger.info({ count: messages.length }, 'New messages (discovery)');
+        for (const msg of messages) {
+          try {
+            await processMessage(msg);
+            discoveryTimestamp = msg.timestamp;
+            saveState();
+          } catch (err) {
+            logger.error(
+              { err, msg: msg.id },
+              'Error in discovery loop, will retry',
+            );
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      logger.error({ err }, 'Error in discovery loop');
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
+  }
+}
+
+async function startAllLoops(): Promise<void> {
+  if (loopsStarted) {
+    logger.debug('Loops already started, skipping duplicate start');
+    return;
+  }
+  loopsStarted = true;
+  logger.info(`NanoClaw running (trigger: @${ASSISTANT_NAME})`);
+
+  // Launch independent loops for all registered groups
+  for (const jid of Object.keys(registeredGroups)) {
+    startGroupLoop(jid);
+  }
+
+  // Launch discovery loop (handles unregistered chats + spawns new group loops)
+  startDiscoveryLoop();
 }
 
 function ensureDockerRunning(): void {

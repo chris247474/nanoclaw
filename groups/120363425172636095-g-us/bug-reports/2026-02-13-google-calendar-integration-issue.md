@@ -44,5 +44,14 @@ Please check:
 
 ---
 
-**Status:** Pending Investigation
-**Assigned to:** @Chris
+## Resolution
+
+**Status:** ✅ RESOLVED
+**Resolution Date:** February 14, 2026
+**Resolved By:** @Chris (deployment fix)
+
+**Root Cause:** Calendar plugin didn't load with the new deployment. New agent instances spinning up resolved the issue.
+
+**Note from Chris (Feb 14):**
+- Calendar and Email are now working
+- Google Drive is currently broken (in progress)

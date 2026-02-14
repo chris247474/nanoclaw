@@ -21,6 +21,12 @@ If a request requires significant work (research, multiple steps, file operation
 
 This keeps users informed instead of waiting in silence.
 
+## Task Progress Updates
+
+Whenever you receive a request, always give the user the following status updates:
+1. That you are starting a task with an ETA
+2. A midway status update when you are 50% done with the task and an ETA till the remaining 50% completion
+
 ## Memory
 
 The `conversations/` folder contains searchable history of past conversations. Use this to recall context from previous sessions.
@@ -40,6 +46,12 @@ Do NOT use markdown headings (##) in WhatsApp messages. Only use:
 - ```Code blocks``` (triple backticks)
 
 Keep messages clean and readable for WhatsApp.
+
+## Task Progress Updates
+
+Whenever you receive a request, always give the user the following status updates:
+1. That you are starting a task with an ETA
+2. A midway status update when you are 50% done with the task and an ETA till the remaining 50% completion
 
 ---
 
