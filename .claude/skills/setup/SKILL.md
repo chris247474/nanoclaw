@@ -15,63 +15,36 @@ Run all commands automatically. Only pause when user action is required (scannin
 npm install
 ```
 
-## 2. Install Container Runtime
+## 2. Install Docker
 
-First, detect the platform and check what's available:
+Check if Docker is installed and running:
 
 ```bash
-echo "Platform: $(uname -s)"
-which container && echo "Apple Container: installed" || echo "Apple Container: not installed"
-which docker && docker info >/dev/null 2>&1 && echo "Docker: installed and running" || echo "Docker: not installed or not running"
+docker --version && docker info >/dev/null 2>&1 && echo "Docker is running" || echo "Docker not running or not installed"
 ```
 
-### If NOT on macOS (Linux, etc.)
-
-Apple Container is macOS-only. Use Docker instead.
-
-Tell the user:
-> You're on Linux, so we'll use Docker for container isolation. Let me set that up now.
-
-**Use the `/convert-to-docker` skill** to convert the codebase to Docker, then continue to Section 3.
-
-### If on macOS
-
-**If Apple Container is already installed:** Continue to Section 3.
-
-**If Apple Container is NOT installed:** Ask the user:
-> NanoClaw needs a container runtime for isolated agent execution. You have two options:
+If not installed or not running, tell the user:
+> Docker is required for running agents in isolated environments.
 >
-> 1. **Apple Container** (default) - macOS-native, lightweight, designed for Apple silicon
-> 2. **Docker** - Cross-platform, widely used, works on macOS and Linux
+> **macOS:**
+> 1. Download Docker Desktop from https://docker.com/products/docker-desktop
+> 2. Install and start Docker Desktop
+> 3. Wait for the whale icon in the menu bar to stop animating
 >
-> Which would you prefer?
-
-#### Option A: Apple Container
-
-Tell the user:
-> Apple Container is required for running agents in isolated environments.
->
-> 1. Download the latest `.pkg` from https://github.com/apple/container/releases
-> 2. Double-click to install
-> 3. Run `container system start` to start the service
+> **Linux:**
+> ```bash
+> curl -fsSL https://get.docker.com | sh
+> sudo systemctl start docker
+> sudo usermod -aG docker $USER  # Then log out and back in
+> ```
 >
 > Let me know when you've completed these steps.
 
 Wait for user confirmation, then verify:
 
 ```bash
-container system start
-container --version
+docker run --rm hello-world
 ```
-
-**Note:** NanoClaw automatically starts the Apple Container system when it launches, so you don't need to start it manually after reboots.
-
-#### Option B: Docker
-
-Tell the user:
-> You've chosen Docker. Let me set that up now.
-
-**Use the `/convert-to-docker` skill** to convert the codebase to Docker, then continue to Section 3.
 
 ## 3. Configure Claude Authentication
 
@@ -127,14 +100,11 @@ Build the NanoClaw agent container:
 
 This creates the `nanoclaw-agent:latest` image with Node.js, Chromium, Claude Code CLI, and agent-browser.
 
-Verify the build succeeded by running a simple test (this auto-detects which runtime you're using):
+Verify the build succeeded:
 
 ```bash
-if which docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-  echo '{}' | docker run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
-else
-  echo '{}' | container run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
-fi
+docker images | grep nanoclaw-agent
+echo '{}' | docker run -i --entrypoint /bin/echo nanoclaw-agent:latest "Container OK" || echo "Container build failed"
 ```
 
 ## 5. WhatsApp Authentication
@@ -358,7 +328,16 @@ Tell the user:
 > }
 > ```
 
-## 10. Configure launchd Service
+## 10. Configure System Service
+
+Build the app first:
+
+```bash
+npm run build
+mkdir -p logs
+```
+
+### macOS (launchd)
 
 Generate the plist file with correct paths automatically:
 
@@ -400,22 +379,41 @@ cat > ~/Library/LaunchAgents/com.nanoclaw.plist << EOF
 </plist>
 EOF
 
-echo "Created launchd plist with:"
-echo "  Node: ${NODE_PATH}"
-echo "  Project: ${PROJECT_PATH}"
-```
-
-Build and start the service:
-
-```bash
-npm run build
-mkdir -p logs
 launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl list | grep nanoclaw
 ```
 
-Verify it's running:
+### Linux (systemd)
+
 ```bash
-launchctl list | grep nanoclaw
+PROJECT_PATH=$(pwd)
+CURRENT_USER=$(whoami)
+
+sudo tee /etc/systemd/system/nanoclaw.service << EOF
+[Unit]
+Description=NanoClaw
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=${CURRENT_USER}
+WorkingDirectory=${PROJECT_PATH}
+ExecStart=/usr/bin/node ${PROJECT_PATH}/dist/index.js
+Restart=always
+RestartSec=10
+StandardOutput=append:${PROJECT_PATH}/logs/nanoclaw.log
+StandardError=append:${PROJECT_PATH}/logs/nanoclaw.error.log
+EnvironmentFile=${PROJECT_PATH}/.env
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable nanoclaw
+sudo systemctl start nanoclaw
+sudo systemctl status nanoclaw
 ```
 
 ## 11. Test
@@ -435,9 +433,9 @@ The user should receive a response in WhatsApp.
 **Service not starting**: Check `logs/nanoclaw.error.log`
 
 **Container agent fails with "Claude Code process exited with code 1"**:
-- Ensure the container runtime is running:
-  - Apple Container: `container system start`
-  - Docker: `docker info` (start Docker Desktop on macOS, or `sudo systemctl start docker` on Linux)
+- Ensure Docker is running: `docker info`
+  - macOS: Start Docker Desktop
+  - Linux: `sudo systemctl start docker`
 - Check container logs: `cat groups/main/logs/container-*.log | tail -50`
 
 **No response to messages**:
@@ -446,11 +444,11 @@ The user should receive a response in WhatsApp.
 - Check `logs/nanoclaw.log` for errors
 
 **WhatsApp disconnected**:
-- The service will show a macOS notification
 - Run `npm run auth` to re-authenticate
-- Restart the service: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
+- Restart the service:
+  - macOS: `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
+  - Linux: `sudo systemctl restart nanoclaw`
 
-**Unload service**:
-```bash
-launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
-```
+**Stop/unload service**:
+- macOS: `launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist`
+- Linux: `sudo systemctl stop nanoclaw`

@@ -567,7 +567,7 @@ Main/admin group only.`,
 
       tool(
         'restart_service',
-        `Restart the entire NanoClaw service via launchctl. WARNING: This will kill ALL active containers including this one. The service will restart automatically via launchd. Use only as a last resort when the bot is in a bad state. Main/admin only.`,
+        `Restart the entire NanoClaw service via system service manager. WARNING: This will kill ALL active containers including this one. The service will restart automatically. Use only as a last resort when the bot is in a bad state. Main/admin only.`,
         {},
         async () => {
           if (!isMain) {
