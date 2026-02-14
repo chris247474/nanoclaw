@@ -474,7 +474,7 @@ function buildVolumeMounts(
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
+  const args: string[] = ['run', '-i', '--rm', '-m', '4G', '--name', containerName];
 
   // Docker: -v with :ro suffix for readonly
   for (const mount of mounts) {
