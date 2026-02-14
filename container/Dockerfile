@@ -37,8 +37,10 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Install agent-browser, claude-code, and Figma MCP globally
-RUN npm install -g agent-browser @anthropic-ai/claude-code figma-developer-mcp
+# Install agent-browser, claude-code, Figma MCP, and Google MCP servers globally
+# Google MCP must be pre-installed to avoid npx download timeouts inside containers
+RUN npm install -g agent-browser @anthropic-ai/claude-code@2.1.42 figma-developer-mcp \
+    @gongrzhe/server-gmail-autoauth-mcp @cocal/google-calendar-mcp @piotr-agier/google-drive-mcp
 
 # Create app directory
 WORKDIR /app

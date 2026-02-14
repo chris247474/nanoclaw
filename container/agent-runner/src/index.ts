@@ -303,14 +303,34 @@ async function main(): Promise<void> {
     // - Admin (org mode): load per-team MCP instances at namespaced paths
     // - Team/Main (org or personal): load MCP if credentials exist at standard paths
     //   (host only mounts credentials if the team/main has them configured)
+    // Helper: find GCP OAuth keys file from multiple possible locations
+    function findOAuthKeys(...paths: string[]): string | undefined {
+      return paths.find(p => fs.existsSync(p));
+    }
+
+    // Calendar/Drive MCP expects {"installed":{...}} or flat {client_id, client_secret} format,
+    // but our OAuth flow produces {"web":{...}}. Convert and write a temp file if needed.
+    function getCalendarCompatOAuthKeys(oauthKeysPath: string): string {
+      try {
+        const raw = JSON.parse(fs.readFileSync(oauthKeysPath, 'utf-8'));
+        if (raw.installed || raw.client_id) return oauthKeysPath; // already compatible
+        if (raw.web) {
+          const converted = { installed: raw.web };
+          const tmpPath = `/tmp/gcp-oauth-${Date.now()}.keys.json`;
+          fs.writeFileSync(tmpPath, JSON.stringify(converted, null, 2));
+          return tmpPath;
+        }
+      } catch {}
+      return oauthKeysPath;
+    }
+
     if (input.isAdmin && input.orgTeamIds) {
       // Admin: discover and load per-team MCP instances
       for (const teamId of input.orgTeamIds) {
         const teamGmailCreds = `/home/node/.gmail-mcp-${teamId}/credentials.json`;
         if (fs.existsSync(teamGmailCreds)) {
           mcpServers[`gmail-${teamId}`] = {
-            command: 'npx',
-            args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+            command: 'gmail-mcp',
             env: {
               GMAIL_MCP_CREDENTIALS_DIR: `/home/node/.gmail-mcp-${teamId}`
             }
@@ -319,10 +339,9 @@ async function main(): Promise<void> {
 
         const teamCalendarTokens = `/home/node/.config/google-calendar-mcp-${teamId}/tokens.json`;
         if (fs.existsSync(teamCalendarTokens)) {
-          const teamOAuthKeys = `/home/node/.gmail-mcp-${teamId}/gcp-oauth.keys.json`;
+          const teamOAuthKeys = getCalendarCompatOAuthKeys(`/home/node/.gmail-mcp-${teamId}/gcp-oauth.keys.json`);
           mcpServers[`google-calendar-${teamId}`] = {
-            command: 'npx',
-            args: ['-y', '@cocal/google-calendar-mcp'],
+            command: 'google-calendar-mcp',
             env: {
               GOOGLE_OAUTH_CREDENTIALS: teamOAuthKeys,
               GOOGLE_CALENDAR_MCP_TOKEN_PATH: teamCalendarTokens
@@ -330,63 +349,76 @@ async function main(): Promise<void> {
           };
         }
 
-        const teamDriveTokens = `/home/node/.config/google-drive-mcp-${teamId}/tokens.json`;
-        if (fs.existsSync(teamDriveTokens)) {
-          const teamOAuthKeys = `/home/node/.gmail-mcp-${teamId}/gcp-oauth.keys.json`;
-          mcpServers[`gdrive-${teamId}`] = {
-            command: 'npx',
-            args: ['-y', '@piotr-agier/google-drive-mcp'],
-            env: {
-              GOOGLE_DRIVE_OAUTH_CREDENTIALS: teamOAuthKeys,
-              GOOGLE_DRIVE_MCP_TOKEN_PATH: teamDriveTokens
-            }
-          };
-        }
+        // Google Drive MCP disabled — resource fetch timeout crashes containers
+        // const teamDriveTokens = `/home/node/.config/google-drive-mcp-${teamId}/tokens.json`;
+        // if (fs.existsSync(teamDriveTokens)) {
+        //   const teamOAuthKeys = getCalendarCompatOAuthKeys(`/home/node/.gmail-mcp-${teamId}/gcp-oauth.keys.json`);
+        //   mcpServers[`gdrive-${teamId}`] = {
+        //     command: 'google-drive-mcp',
+        //     env: {
+        //       GOOGLE_DRIVE_OAUTH_CREDENTIALS: teamOAuthKeys,
+        //       GOOGLE_DRIVE_MCP_TOKEN_PATH: teamDriveTokens
+        //     }
+        //   };
+        // }
       }
     } else {
       // Team or Main (personal mode): load MCP if credentials exist at standard paths
       const gmailCredsPath = '/home/node/.gmail-mcp/credentials.json';
       if (fs.existsSync(gmailCredsPath)) {
         mcpServers['gmail'] = {
-          command: 'npx',
-          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp']
+          command: 'gmail-mcp',
         };
       }
 
       const calendarTokensPath = '/home/node/.config/google-calendar-mcp/tokens.json';
       if (fs.existsSync(calendarTokensPath)) {
-        mcpServers['google-calendar'] = {
-          command: 'npx',
-          args: ['-y', '@cocal/google-calendar-mcp'],
-          env: {
-            GOOGLE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
-            GOOGLE_CALENDAR_MCP_TOKEN_PATH: calendarTokensPath
-          }
-        };
-      }
-
-      const gdriveTokensPath = '/home/node/.config/google-drive-mcp/tokens.json';
-      if (fs.existsSync(gdriveTokensPath)) {
-        mcpServers['gdrive'] = {
-          command: 'npx',
-          args: ['-y', '@piotr-agier/google-drive-mcp'],
-          env: {
-            GOOGLE_DRIVE_OAUTH_CREDENTIALS: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
-            GOOGLE_DRIVE_MCP_TOKEN_PATH: gdriveTokensPath
-          }
-        };
-      }
-    }
-
-    // Add Figma MCP if token exists (available to all groups)
-    if (process.env.FIGMA_ACCESS_TOKEN) {
-      mcpServers['figma'] = {
-        command: 'figma-developer-mcp',
-        env: {
-          FIGMA_ACCESS_TOKEN: process.env.FIGMA_ACCESS_TOKEN
+        // OAuth keys: prefer per-group copy, fall back to Gmail dir (home-dir fallback for isMain)
+        const oauthKeysRaw = findOAuthKeys(
+          '/home/node/.config/google-calendar-mcp/gcp-oauth.keys.json',
+          '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+        );
+        if (oauthKeysRaw) {
+          mcpServers['google-calendar'] = {
+            command: 'google-calendar-mcp',
+            env: {
+              GOOGLE_OAUTH_CREDENTIALS: getCalendarCompatOAuthKeys(oauthKeysRaw),
+              GOOGLE_CALENDAR_MCP_TOKEN_PATH: calendarTokensPath
+            }
+          };
         }
-      };
+      }
+
+      // Google Drive MCP disabled — resource fetch times out after 60s inside
+      // Apple Container, triggering SessionEnd and crashing the agent.
+      // The MCP connects fine but resource listing hangs. Re-enable when fixed.
+      // const gdriveTokensPath = '/home/node/.config/google-drive-mcp/tokens.json';
+      // if (fs.existsSync(gdriveTokensPath)) {
+      //   const oauthKeysRaw = findOAuthKeys(
+      //     '/home/node/.config/google-drive-mcp/gcp-oauth.keys.json',
+      //     '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+      //   );
+      //   if (oauthKeysRaw) {
+      //     mcpServers['gdrive'] = {
+      //       command: 'google-drive-mcp',
+      //       env: {
+      //         GOOGLE_DRIVE_OAUTH_CREDENTIALS: getCalendarCompatOAuthKeys(oauthKeysRaw),
+      //         GOOGLE_DRIVE_MCP_TOKEN_PATH: gdriveTokensPath
+      //       }
+      //     };
+      //   }
+      // }
     }
+
+    // Figma MCP disabled — figma-developer-mcp hangs for 30s on connection
+    // inside Apple Container, blocking session init. Re-enable when Figma
+    // connectivity from containers is verified.
+    // if (process.env.FIGMA_ACCESS_TOKEN) {
+    //   mcpServers['figma'] = {
+    //     command: 'figma-developer-mcp',
+    //     env: { FIGMA_API_KEY: process.env.FIGMA_ACCESS_TOKEN }
+    //   };
+    // }
 
     return {
       ...modelConfig,
@@ -461,6 +493,39 @@ async function main(): Promise<void> {
 
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
+
+    // If session resume failed (no newSessionId assigned = session never initialized),
+    // retry once without session resume. This catches corrupted or missing transcripts.
+    if (input.sessionId && !newSessionId) {
+      log(`Session resume may have failed (no session initialized). Retrying without resume...`);
+      input.sessionId = undefined;
+
+      try {
+        const retryConfig: any = {};
+        if (!useThirdParty && process.env.CLAUDE_MODEL) {
+          retryConfig.model = process.env.CLAUDE_MODEL;
+          if (process.env.CLAUDE_FALLBACK_MODEL) {
+            retryConfig.fallbackModel = process.env.CLAUDE_FALLBACK_MODEL;
+          }
+        }
+
+        await runAgent(buildQueryOptions(retryConfig));
+
+        if (useThirdParty) restoreClaudeEnv();
+
+        log('Agent completed successfully after retry without session');
+        writeOutput({
+          status: 'success',
+          result,
+          newSessionId
+        });
+        return;
+      } catch (retryErr) {
+        const retryMessage = retryErr instanceof Error ? retryErr.message : String(retryErr);
+        log(`Retry without session also failed: ${retryMessage}`);
+        // Fall through to normal error handling below
+      }
+    }
 
     // If 3rd party failed and Claude fallback is available, try Claude
     if (useThirdParty && (origOAuthToken || origApiKey)) {

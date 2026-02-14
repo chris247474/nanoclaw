@@ -28,6 +28,7 @@ import {
   OrgMountContext,
   killContainer,
   runContainerAgent,
+  validateSessionId,
   writeGroupsSnapshot,
   writeOrgContext,
   writeTasksSnapshot,
@@ -440,7 +441,14 @@ async function runAgent(
   chatJid: string,
 ): Promise<string | null> {
   const isMain = group.folder === MAIN_GROUP_FOLDER || group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const rawSessionId = sessions[group.folder];
+  const sessionId = validateSessionId(rawSessionId, group.folder);
+
+  // Clean up stale session from memory and disk
+  if (rawSessionId && !sessionId) {
+    delete sessions[group.folder];
+    saveJson(path.join(DATA_DIR, 'sessions.json'), sessions);
+  }
 
   // Resolve org-mode context (admin, team, or null for personal mode)
   let orgMountContext: OrgMountContext | undefined;

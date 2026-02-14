@@ -131,6 +131,29 @@ export function resetTracking(): void {
   recentErrorsBuffer.length = 0;
 }
 
+/**
+ * Validate that a session ID still has a valid transcript on disk.
+ * Returns the sessionId if valid, undefined if stale/missing.
+ */
+export function validateSessionId(
+  sessionId: string | undefined,
+  groupFolder: string,
+  dataDir: string = DATA_DIR,
+): string | undefined {
+  if (!sessionId) return undefined;
+
+  const transcriptPath = path.join(
+    dataDir, 'sessions', groupFolder, '.claude', 'projects', '-workspace-group', `${sessionId}.jsonl`,
+  );
+
+  if (fs.existsSync(transcriptPath)) {
+    return sessionId;
+  }
+
+  logger.warn({ sessionId, groupFolder, transcriptPath }, 'Stale session ID detected — transcript missing');
+  return undefined;
+}
+
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
