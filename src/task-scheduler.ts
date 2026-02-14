@@ -9,7 +9,7 @@ import {
   SCHEDULER_POLL_INTERVAL,
   TIMEZONE,
 } from './config.js';
-import { runContainerAgent, writeTasksSnapshot } from './container-runner.js';
+import { runContainerAgent, validateSessionId, writeTasksSnapshot } from './container-runner.js';
 import {
   getAllTasks,
   getDueTasks,
@@ -80,10 +80,11 @@ async function runTask(
   let result: string | null = null;
   let error: string | null = null;
 
-  // For group context mode, use the group's current session
+  // For group context mode, use the group's current session (validated)
   const sessions = deps.getSessions();
-  const sessionId =
+  const rawSessionId =
     task.context_mode === 'group' ? sessions[task.group_folder] : undefined;
+  const sessionId = validateSessionId(rawSessionId, task.group_folder);
 
   try {
     const output = await runContainerAgent(group, {

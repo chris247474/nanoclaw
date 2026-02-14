@@ -62,7 +62,11 @@ const CALENDAR_SCOPES = [
   'https://www.googleapis.com/auth/calendar',
 ];
 const DRIVE_SCOPES = [
-  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/drive',
+  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/documents',
+  'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/presentations',
 ];
 
 // --- State ---
@@ -264,6 +268,10 @@ export function saveUserTokens(
       path.join(calendarDir, 'tokens.json'),
       JSON.stringify({ normal: flatTokens }, null, 2),
     );
+    // Copy shared OAuth keys (needed by Calendar MCP for token refresh)
+    if (fs.existsSync(GCP_OAUTH_KEYS_PATH)) {
+      fs.copyFileSync(GCP_OAUTH_KEYS_PATH, path.join(calendarDir, 'gcp-oauth.keys.json'));
+    }
   }
 
   if (service === 'all' || service === 'drive') {
@@ -273,6 +281,10 @@ export function saveUserTokens(
       path.join(driveDir, 'tokens.json'),
       JSON.stringify(flatTokens, null, 2),
     );
+    // Copy shared OAuth keys (needed by Drive MCP for token refresh)
+    if (fs.existsSync(GCP_OAUTH_KEYS_PATH)) {
+      fs.copyFileSync(GCP_OAUTH_KEYS_PATH, path.join(driveDir, 'gcp-oauth.keys.json'));
+    }
   }
 }
 

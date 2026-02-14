@@ -1,6 +1,6 @@
 /**
  * Container Runner for NanoClaw
- * Spawns agent execution in Apple Container and handles IPC
+ * Spawns agent execution in Docker container and handles IPC
  */
 import { exec, spawn } from 'child_process';
 import fs from 'fs';
@@ -129,6 +129,29 @@ export function resetTracking(): void {
   activeContainersMap.clear();
   recentRunsBuffer.length = 0;
   recentErrorsBuffer.length = 0;
+}
+
+/**
+ * Validate that a session ID still has a valid transcript on disk.
+ * Returns the sessionId if valid, undefined if stale/missing.
+ */
+export function validateSessionId(
+  sessionId: string | undefined,
+  groupFolder: string,
+  dataDir: string = DATA_DIR,
+): string | undefined {
+  if (!sessionId) return undefined;
+
+  const transcriptPath = path.join(
+    dataDir, 'sessions', groupFolder, '.claude', 'projects', '-workspace-group', `${sessionId}.jsonl`,
+  );
+
+  if (fs.existsSync(transcriptPath)) {
+    return sessionId;
+  }
+
+  logger.warn({ sessionId, groupFolder, transcriptPath }, 'Stale session ID detected — transcript missing');
+  return undefined;
 }
 
 // Sentinel markers for robust output parsing (must match agent-runner)
@@ -272,7 +295,7 @@ function buildVolumeMounts(
     });
 
     // Global memory directory (read-only for non-main)
-    // Apple Container only supports directory mounts, not file mounts
+    // Docker bind mounts work with both files and directories
     const globalDir = path.join(GROUPS_DIR, 'global');
     if (fs.existsSync(globalDir)) {
       mounts.push({
@@ -389,7 +412,7 @@ function buildVolumeMounts(
     readonly: false,
   });
 
-  // Environment file directory (workaround for Apple Container -i env var bug)
+  // Environment file directory (keeps credentials out of process listings)
   // Only expose specific auth variables needed by Claude Code, not the entire .env
   // Per-group env dirs allow model overrides (admin groups get Opus, others get Sonnet)
   const envDir = path.join(DATA_DIR, 'env', group.folder);
@@ -451,15 +474,12 @@ function buildVolumeMounts(
 }
 
 function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
-  const args: string[] = ['run', '-i', '--rm', '-m', '4G', '--name', containerName];
+  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
 
-  // Apple Container: --mount for readonly, -v for read-write
+  // Docker: -v with :ro suffix for readonly
   for (const mount of mounts) {
     if (mount.readonly) {
-      args.push(
-        '--mount',
-        `type=bind,source=${mount.hostPath},target=${mount.containerPath},readonly`,
-      );
+      args.push('-v', `${mount.hostPath}:${mount.containerPath}:ro`);
     } else {
       args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
     }
@@ -512,7 +532,7 @@ export async function runContainerAgent(
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const container = spawn('container', containerArgs, {
+    const container = spawn('docker', containerArgs, {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
@@ -580,7 +600,7 @@ export async function runContainerAgent(
         type: 'timeout',
       });
       // Graceful stop: sends SIGTERM, waits, then SIGKILL — lets --rm fire
-      exec(`container stop ${containerName}`, { timeout: 15000 }, (err) => {
+      exec(`docker stop ${containerName}`, { timeout: 15000 }, (err) => {
         if (err) {
           logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
           container.kill('SIGKILL');

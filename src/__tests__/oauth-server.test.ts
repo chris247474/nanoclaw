@@ -117,16 +117,20 @@ describe('oauth-server', () => {
 
     it('returns drive scopes', () => {
       const scopes = resolveScopes('drive');
-      expect(scopes).toContain('https://www.googleapis.com/auth/drive.readonly');
-      expect(scopes).toHaveLength(1);
+      expect(scopes).toContain('https://www.googleapis.com/auth/drive');
+      expect(scopes).toContain('https://www.googleapis.com/auth/drive.file');
+      expect(scopes).toContain('https://www.googleapis.com/auth/documents');
+      expect(scopes).toContain('https://www.googleapis.com/auth/spreadsheets');
+      expect(scopes).toContain('https://www.googleapis.com/auth/presentations');
+      expect(scopes).toHaveLength(5);
     });
 
     it('returns all scopes combined', () => {
       const scopes = resolveScopes('all');
-      expect(scopes).toHaveLength(4);
+      expect(scopes).toHaveLength(8);
       expect(scopes).toContain('https://www.googleapis.com/auth/gmail.modify');
       expect(scopes).toContain('https://www.googleapis.com/auth/calendar');
-      expect(scopes).toContain('https://www.googleapis.com/auth/drive.readonly');
+      expect(scopes).toContain('https://www.googleapis.com/auth/drive');
     });
   });
 
@@ -192,7 +196,7 @@ describe('oauth-server', () => {
           scope: expect.arrayContaining([
             'https://www.googleapis.com/auth/gmail.modify',
             'https://www.googleapis.com/auth/calendar',
-            'https://www.googleapis.com/auth/drive.readonly',
+            'https://www.googleapis.com/auth/drive',
           ]),
           state: expect.any(String),
         }),

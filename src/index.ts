@@ -28,6 +28,7 @@ import {
   OrgMountContext,
   killContainer,
   runContainerAgent,
+  validateSessionId,
   writeGroupsSnapshot,
   writeOrgContext,
   writeTasksSnapshot,
@@ -440,7 +441,14 @@ async function runAgent(
   chatJid: string,
 ): Promise<string | null> {
   const isMain = group.folder === MAIN_GROUP_FOLDER || group.isMain === true;
-  const sessionId = sessions[group.folder];
+  const rawSessionId = sessions[group.folder];
+  const sessionId = validateSessionId(rawSessionId, group.folder);
+
+  // Clean up stale session from memory and disk
+  if (rawSessionId && !sessionId) {
+    delete sessions[group.folder];
+    saveJson(path.join(DATA_DIR, 'sessions.json'), sessions);
+  }
 
   // Resolve org-mode context (admin, team, or null for personal mode)
   let orgMountContext: OrgMountContext | undefined;
@@ -1066,12 +1074,12 @@ async function processTaskIpc(
     case 'restart_service':
       if (isMain) {
         logger.info({ sourceGroup }, 'Service restart requested via IPC');
-        exec(
-          `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`,
-          (err) => {
-            if (err) logger.error({ err }, 'Failed to restart service via launchctl');
-          },
-        );
+        const restartCmd = process.platform === 'darwin'
+          ? `launchctl kickstart -k gui/$(id -u)/com.nanoclaw`
+          : 'sudo systemctl restart nanoclaw';
+        exec(restartCmd, (err) => {
+          if (err) logger.error({ err }, 'Failed to restart service');
+        });
       } else {
         logger.warn({ sourceGroup }, 'Unauthorized restart_service attempt blocked');
       }
@@ -1374,43 +1382,22 @@ async function startAdminLoop(adminJid: string): Promise<void> {
   }
 }
 
-function ensureContainerSystemRunning(): void {
+function ensureDockerRunning(): void {
   try {
-    execSync('container system status', { stdio: 'pipe' });
-    logger.debug('Apple Container system already running');
+    execSync('docker info', { stdio: 'pipe', timeout: 10000 });
+    logger.debug('Docker daemon is running');
   } catch {
-    logger.info('Starting Apple Container system...');
-    try {
-      execSync('container system start', { stdio: 'pipe', timeout: 30000 });
-      logger.info('Apple Container system started');
-    } catch (err) {
-      logger.error({ err }, 'Failed to start Apple Container system');
-      console.error(
-        '\n╔════════════════════════════════════════════════════════════════╗',
-      );
-      console.error(
-        '║  FATAL: Apple Container system failed to start                 ║',
-      );
-      console.error(
-        '║                                                                ║',
-      );
-      console.error(
-        '║  Agents cannot run without Apple Container. To fix:           ║',
-      );
-      console.error(
-        '║  1. Install from: https://github.com/apple/container/releases ║',
-      );
-      console.error(
-        '║  2. Run: container system start                               ║',
-      );
-      console.error(
-        '║  3. Restart NanoClaw                                          ║',
-      );
-      console.error(
-        '╚════════════════════════════════════════════════════════════════╝\n',
-      );
-      throw new Error('Apple Container system is required but failed to start');
-    }
+    logger.error('Docker daemon is not running');
+    console.error('\n╔════════════════════════════════════════════════════════════════╗');
+    console.error('║  FATAL: Docker is not running                                  ║');
+    console.error('║                                                                ║');
+    console.error('║  Agents cannot run without Docker. To fix:                     ║');
+    console.error('║  macOS: Start Docker Desktop                                   ║');
+    console.error('║  Linux: sudo systemctl start docker                            ║');
+    console.error('║                                                                ║');
+    console.error('║  Install from: https://docker.com/products/docker-desktop      ║');
+    console.error('╚════════════════════════════════════════════════════════════════╝\n');
+    throw new Error('Docker is required but not running');
   }
 
   // Clean up stopped NanoClaw containers from previous runs
@@ -1433,7 +1420,7 @@ function ensureContainerSystemRunning(): void {
 }
 
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
+  ensureDockerRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();
