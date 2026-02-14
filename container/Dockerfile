@@ -54,6 +54,9 @@ RUN npm install
 # Copy source code
 COPY agent-runner/ ./
 
+# Copy google-drive-mcp wrapper that strips resources capability
+COPY gdrive-mcp-no-resources.cjs /app/gdrive-mcp-no-resources.cjs
+
 # Build TypeScript
 RUN npm run build
 

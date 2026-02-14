@@ -349,18 +349,18 @@ async function main(): Promise<void> {
           };
         }
 
-        // Google Drive MCP disabled — resource fetch timeout crashes containers
-        // const teamDriveTokens = `/home/node/.config/google-drive-mcp-${teamId}/tokens.json`;
-        // if (fs.existsSync(teamDriveTokens)) {
-        //   const teamOAuthKeys = getCalendarCompatOAuthKeys(`/home/node/.gmail-mcp-${teamId}/gcp-oauth.keys.json`);
-        //   mcpServers[`gdrive-${teamId}`] = {
-        //     command: 'google-drive-mcp',
-        //     env: {
-        //       GOOGLE_DRIVE_OAUTH_CREDENTIALS: teamOAuthKeys,
-        //       GOOGLE_DRIVE_MCP_TOKEN_PATH: teamDriveTokens
-        //     }
-        //   };
-        // }
+        const teamDriveTokens = `/home/node/.config/google-drive-mcp-${teamId}/tokens.json`;
+        if (fs.existsSync(teamDriveTokens)) {
+          const teamOAuthKeys = getCalendarCompatOAuthKeys(`/home/node/.gmail-mcp-${teamId}/gcp-oauth.keys.json`);
+          mcpServers[`gdrive-${teamId}`] = {
+            command: 'node',
+            args: ['/app/gdrive-mcp-no-resources.cjs'],
+            env: {
+              GOOGLE_DRIVE_OAUTH_CREDENTIALS: teamOAuthKeys,
+              GOOGLE_DRIVE_MCP_TOKEN_PATH: teamDriveTokens
+            }
+          };
+        }
       }
     } else {
       // Team or Main (personal mode): load MCP if credentials exist at standard paths
@@ -389,25 +389,23 @@ async function main(): Promise<void> {
         }
       }
 
-      // Google Drive MCP disabled — resource fetch times out after 60s inside
-      // Apple Container, triggering SessionEnd and crashing the agent.
-      // The MCP connects fine but resource listing hangs. Re-enable when fixed.
-      // const gdriveTokensPath = '/home/node/.config/google-drive-mcp/tokens.json';
-      // if (fs.existsSync(gdriveTokensPath)) {
-      //   const oauthKeysRaw = findOAuthKeys(
-      //     '/home/node/.config/google-drive-mcp/gcp-oauth.keys.json',
-      //     '/home/node/.gmail-mcp/gcp-oauth.keys.json',
-      //   );
-      //   if (oauthKeysRaw) {
-      //     mcpServers['gdrive'] = {
-      //       command: 'google-drive-mcp',
-      //       env: {
-      //         GOOGLE_DRIVE_OAUTH_CREDENTIALS: getCalendarCompatOAuthKeys(oauthKeysRaw),
-      //         GOOGLE_DRIVE_MCP_TOKEN_PATH: gdriveTokensPath
-      //       }
-      //     };
-      //   }
-      // }
+      const gdriveTokensPath = '/home/node/.config/google-drive-mcp/tokens.json';
+      if (fs.existsSync(gdriveTokensPath)) {
+        const oauthKeysRaw = findOAuthKeys(
+          '/home/node/.config/google-drive-mcp/gcp-oauth.keys.json',
+          '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+        );
+        if (oauthKeysRaw) {
+          mcpServers['gdrive'] = {
+            command: 'node',
+            args: ['/app/gdrive-mcp-no-resources.cjs'],
+            env: {
+              GOOGLE_DRIVE_OAUTH_CREDENTIALS: getCalendarCompatOAuthKeys(oauthKeysRaw),
+              GOOGLE_DRIVE_MCP_TOKEN_PATH: gdriveTokensPath
+            }
+          };
+        }
+      }
     }
 
     // Figma MCP disabled — figma-developer-mcp hangs for 30s on connection
@@ -435,6 +433,8 @@ async function main(): Promise<void> {
         'mcp__google-calendar-*__*',
         'mcp__gdrive__*',
         'mcp__gdrive-*__*',
+        'mcp__google-drive__*',
+        'mcp__google_drive__*',
         'mcp__figma__*'
       ],
       permissionMode: 'bypassPermissions' as const,
