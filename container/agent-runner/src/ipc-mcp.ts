@@ -419,8 +419,12 @@ For DMs: use pending_dm_requests.json to find the JID. Folder name should be "dm
       tool(
         'request_google_oauth',
         `Request Google account OAuth setup for the current chat.
-Use this when a user wants to connect their Google account (Gmail, Calendar, Drive).
-This sends an authorization URL to the chat. After they authorize, Google tools become available automatically.
+IMPORTANT: Do NOT use this tool if Google tools (gmail, google-calendar, gdrive) are already available in your MCP tools list. Only use this when:
+- The user explicitly asks to connect/reconnect their Google account
+- You tried to use a Google tool and got an authentication error
+- No Google MCP tools are available at all
+
+This sends an authorization URL to the chat. After they authorize, Google tools become available in the NEXT session.
 
 Service options:
 - "all" (recommended): Connect Gmail, Calendar, and Drive in one authorization

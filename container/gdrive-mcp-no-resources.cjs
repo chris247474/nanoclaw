@@ -12,9 +12,7 @@
  */
 const { spawn } = require('child_process');
 
-const gdriveBin = require.resolve('@piotr-agier/google-drive-mcp/dist/index.js');
-
-const child = spawn(process.execPath, [gdriveBin], {
+const child = spawn('google-drive-mcp', [], {
   stdio: ['pipe', 'pipe', 'inherit'],
   env: process.env,
 });

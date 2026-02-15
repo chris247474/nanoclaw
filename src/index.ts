@@ -157,6 +157,40 @@ function getLatestTimestamp(): string | null {
   return all.length ? all.reduce((a, b) => (a > b ? a : b)) : null;
 }
 
+/**
+ * Check if OAuth tokens exist for a group folder
+ */
+function hasOAuthTokens(folder: string, service: OAuthService): boolean {
+  const credsBase = path.join(GROUPS_DIR, folder, '.credentials');
+  if (!fs.existsSync(credsBase)) return false;
+
+  if (service === 'all' || service === 'gmail') {
+    const gmailTokens = path.join(credsBase, 'gmail-mcp', 'credentials.json');
+    if (!fs.existsSync(gmailTokens)) return false;
+  }
+  if (service === 'all' || service === 'calendar') {
+    const calendarTokens = path.join(credsBase, 'google-calendar-mcp', 'tokens.json');
+    if (!fs.existsSync(calendarTokens)) return false;
+  }
+  if (service === 'all' || service === 'drive') {
+    const driveTokens = path.join(credsBase, 'google-drive-mcp', 'tokens.json');
+    if (!fs.existsSync(driveTokens)) return false;
+  }
+  return true;
+}
+
+/**
+ * Check if ANY Google OAuth tokens exist (at least one service connected).
+ * Used to decide whether to show OAuth setup or let the container handle Google requests.
+ */
+function hasAnyOAuthTokens(folder: string): boolean {
+  const credsBase = path.join(GROUPS_DIR, folder, '.credentials');
+  if (!fs.existsSync(credsBase)) return false;
+  return fs.existsSync(path.join(credsBase, 'gmail-mcp', 'credentials.json'))
+    || fs.existsSync(path.join(credsBase, 'google-calendar-mcp', 'tokens.json'))
+    || fs.existsSync(path.join(credsBase, 'google-drive-mcp', 'tokens.json'));
+}
+
 function registerGroup(jid: string, group: RegisteredGroup): void {
   registeredGroups[jid] = group;
   saveJson(path.join(DATA_DIR, 'registered_groups.json'), registeredGroups);
@@ -164,6 +198,15 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
   // Create group folder
   const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(path.join(groupDir, 'logs'), { recursive: true });
+
+  // Write config.json for the group
+  const configPath = path.join(groupDir, 'config.json');
+  fs.writeFileSync(configPath, JSON.stringify({
+    name: group.name,
+    trigger: group.trigger,
+    alwaysProcess: group.alwaysProcess,
+    isDm: group.isDm,
+  }, null, 2));
 
   // DM users: create credential directories and welcome CLAUDE.md
   if (group.isDm) {
@@ -176,7 +219,11 @@ function registerGroup(jid: string, group: RegisteredGroup): void {
     if (!fs.existsSync(claudeMdPath)) {
       fs.writeFileSync(
         claudeMdPath,
-        `# DM User - ${group.name}\n\nYou are ${ASSISTANT_NAME}, a personal assistant for this user.\n\n## Capabilities\n\n- Gmail access (read, search, send, draft emails via MCP)\n- Google Calendar access (view, create, update, delete events via MCP)\n- Google Drive access (search, read files, read/write Sheets via MCP)\n- Web search and information lookup\n- File operations within your workspace\n- Schedule recurring tasks\n\n## Setup Required\n\nThis is a new DM registration. The user may need to set up Google integrations.\nCredentials are stored in /workspace/group/.credentials/\n\n## Guidelines\n\n- Be helpful and proactive\n- Provide clear, actionable responses\n- Use WhatsApp-friendly formatting\n- Your data is isolated from other users\n\n## Task Progress Updates\n\nWhenever you receive a request, always give the user the following status updates:\n1. That you are starting a task with an ETA\n2. A midway status update when you are 50% done with the task and an ETA till the remaining 50% completion\n`,
+        `# DM User - ${group.name}\n\nYou are ${ASSISTANT_NAME}, a personal assistant for this user.\n\n## Capabilities\n\n- Gmail access (read, search, send, draft emails via MCP)\n- Google Calendar access (view, create, update, delete events via MCP)\n- Google Drive access (search, read files, read/write Sheets via MCP)\n- Web search and information lookup\n- File operations within your workspace\n- Schedule recurring tasks\n\n## Origin Story\n\nWhen a new user messages you for the first time, introduce yourself with this message:\n\n> Hey! I'm an AI assistant built on Anthropic's Claude and Minimax's M2.5 models.\n>\n> I can help businesses automate customer service, accounting via Google Sheets, and general work tasks including Google Docs and Presentations.\n>\n> **Recommended setup:** Your system admin can link a WhatsApp account, then create department groups (like Accounting, Sales, Customer Support) and link a Google account to each. For example, an \"accounting@mycompanydomain.com\" Google account linked to an Accounting WhatsApp group. Each group has its own bot that can access that department's email and respond automatically or ask for permission first.\n>\n> I can manage Google Docs, Google Sheets, Google Presentations, send emails, and manage a Google Calendar. Try it out by asking for a task!\n\n## Setup Required\n\nThis is a new DM registration. The user may need to set up Google integrations.\nCredentials are stored in /workspace/group/.credentials/\n\n## Guidelines\n\n- Be helpful and proactive\n- Provide clear, actionable responses\n- Use WhatsApp-friendly formatting\n- Your data is isolated from other users
+
+## URL Formatting
+
+When sharing URLs (especially Google Docs, Sheets, Drive links), NEVER wrap them in asterisks or any markdown formatting. Output the raw URL only.\n\n## Task Progress Updates\n\nWhenever you receive a request, always give the user the following status updates:\n1. That you are starting a task with an ETA\n2. A midway status update when you are 50% done with the task and an ETA till the remaining 50% completion\n`,
       );
     }
   }
@@ -295,50 +342,50 @@ async function processMessage(msg: NewMessage): Promise<void> {
   if (!group && (msg.chat_jid.endsWith('@s.whatsapp.net') || msg.chat_jid.endsWith('@lid'))) {
     const dmContent = msg.content.trim();
 
-    // Fast-path: handle Google OAuth setup directly without container agent
-    if (/\b(set\s*up|connect|link|auth)\b.*\b(google|gmail|calendar|drive)\b/i.test(dmContent) ||
-        /\b(google|gmail|calendar|drive)\b.*\b(set\s*up|connect|link|auth)\b/i.test(dmContent)) {
+    // Fast-path: Google OAuth setup for unregistered DMs with NO tokens yet.
+    // If user already has any Google tokens, skip — let them auto-register and
+    // the container agent will handle Google requests with its mounted credentials.
+    if (/\bgoogle\b/i.test(dmContent)) {
       const phone = msg.chat_jid.split('@')[0];
       const folder = `dm-${phone}`;
-      try {
-        const service: OAuthService = /\bgmail\b/i.test(dmContent) ? 'gmail'
-          : /\bcalendar\b/i.test(dmContent) ? 'calendar'
-          : /\bdrive\b/i.test(dmContent) ? 'drive'
-          : 'all';
-        const { authUrl } = createOAuthSession(msg.chat_jid, folder, service);
-        await sendMessage(
-          msg.chat_jid,
-          `${ASSISTANT_NAME}: To connect your Google account, click this link:\n\n${authUrl}\n\nThis link expires in 10 minutes.`,
-        );
-        logger.info({ jid: msg.chat_jid, folder, service }, 'OAuth URL sent to unregistered DM user');
-      } catch (err) {
-        logger.error({ err, jid: msg.chat_jid }, 'Failed to create OAuth session for unregistered DM');
-        await sendMessage(msg.chat_jid, `${ASSISTANT_NAME}: Failed to start Google setup. Please try again later.`);
+
+      if (!hasAnyOAuthTokens(folder)) {
+        // No Google tokens at all → send OAuth URL for all services
+        try {
+          const { authUrl } = createOAuthSession(msg.chat_jid, folder, 'all');
+          await sendMessage(
+            msg.chat_jid,
+            `${ASSISTANT_NAME}: To connect your Google account, click this link:\n\n${authUrl}\n\nThis link expires in 10 minutes.`,
+          );
+          logger.info({ jid: msg.chat_jid, folder }, 'OAuth URL sent to unregistered DM user');
+        } catch (err) {
+          logger.error({ err, jid: msg.chat_jid }, 'Failed to create OAuth session for unregistered DM');
+          await sendMessage(msg.chat_jid, `${ASSISTANT_NAME}: Failed to start Google setup. Please try again later.`);
+        }
+        return;
       }
-      return;
+      // Has tokens → fall through to auto-registration and container processing
     }
 
-    if (!isPending(msg.chat_jid)) {
+    // AUTO-REGISTER: All DMs are auto-registered without admin approval
+    if (!registeredGroups[msg.chat_jid]) {
       const phone = msg.chat_jid.split('@')[0];
-      addPendingRequest({
-        jid: msg.chat_jid,
-        senderName: msg.sender_name,
-        requestedAt: msg.timestamp,
-        triggerMessage: msg.content,
-        phone,
+      const folder = `dm-${phone}`;
+      registerGroup(msg.chat_jid, {
+        name: msg.sender_name || folder,
+        folder,
+        trigger: `@${ASSISTANT_NAME}`,
+        added_at: new Date().toISOString(),
+        isDm: true,
+        alwaysProcess: true,
       });
 
-      // Notify all admin channels
-      await notifyAdmins(
-        `${ASSISTANT_NAME}: New DM registration request from ${msg.sender_name || phone} (${phone}).\nMessage: "${dmContent}"\n\nTo approve, use register_group with JID: ${msg.chat_jid}, folder: dm-${phone}`,
-      );
-
       logger.info(
-        { jid: msg.chat_jid, phone, senderName: msg.sender_name },
-        'DM registration request created',
+        { jid: msg.chat_jid, phone, senderName: msg.sender_name, folder },
+        'DM auto-registered without approval',
       );
     }
-    return;
+    // Continue to process this message with the newly registered group
   }
 
   if (!group) {
@@ -356,26 +403,8 @@ async function processMessage(msg: NewMessage): Promise<void> {
   const content = msg.content.trim();
   const isMainGroup = group.folder === MAIN_GROUP_FOLDER || group.isMain;
 
-  // Fast-path: Google OAuth setup — handle directly without container agent
-  if (/\b(set\s*up|connect|link|auth)\b.*\b(google|gmail|calendar|drive)\b/i.test(content) ||
-      /\b(google|gmail|calendar|drive)\b.*\b(set\s*up|connect|link|auth)\b/i.test(content)) {
-    try {
-      const service: OAuthService = /\bgmail\b/i.test(content) ? 'gmail'
-        : /\bcalendar\b/i.test(content) ? 'calendar'
-        : /\bdrive\b/i.test(content) ? 'drive'
-        : 'all';
-      const { authUrl } = createOAuthSession(msg.chat_jid, group.folder, service);
-      await sendMessage(
-        msg.chat_jid,
-        `${ASSISTANT_NAME}: To connect your Google account, click this link:\n\n${authUrl}\n\nThis link expires in 10 minutes.`,
-      );
-      logger.info({ jid: msg.chat_jid, folder: group.folder, service }, 'OAuth URL sent (fast-path)');
-    } catch (err) {
-      logger.error({ err, jid: msg.chat_jid }, 'Failed to create OAuth session');
-      await sendMessage(msg.chat_jid, `${ASSISTANT_NAME}: Failed to start Google setup. Please try again later.`);
-    }
-    return;
-  }
+  // Google OAuth is handled by the container agent via the request_google_oauth IPC tool.
+  // No fast-path interception here — messages mentioning "google" flow to the container normally.
 
   // Main group responds to all messages; other groups require trigger prefix or @mention
   const hasTrigger = TRIGGER_PATTERN.test(content);
